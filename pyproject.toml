@@ -1,11 +1,17 @@
 [project]
 name = "incinerator"
 version = "0.1.0"
-description = "Add your description here"
+description = "A pixel-level exoplanet transit vetting technique!"
 readme = "README.md"
 authors = [
-    { name = "juliemoqs", email = "julie.moquin02@gmail.com" }
+    { name = "Julie Moquin", email = "julie.moquin@nasa.gov" }, 
+    { name = "Robert F. Wilson", email = "robert.f.wilson@nasa.gov" },
+    { name = "Jorge Martínez-Palomera", email = "jorge.i.martinezpalomera@nasa.gov" },
+    { name = "Christina Hedges", email = "christina.l.hedges@nasa.gov" }
 ]
+license = "MIT"
+
+
 requires-python = ">=3.12,<4.0"
 dependencies = [
     "astropy>=7.1.0,<8.0.0",
@@ -27,6 +33,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "ipykernel>=7.2.0",
+    "mypy>=1.19.1",
     "pytest>=9.0.2",
     "ruff>=0.15.0",
 ]
