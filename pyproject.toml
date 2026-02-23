@@ -1,0 +1,32 @@
+[project]
+name = "incinerator"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "juliemoqs", email = "julie.moquin02@gmail.com" }
+]
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "astropy>=7.1.0,<8.0.0",
+    "astroquery>=0.4.11",
+    "lamatrix>=1.0.1",
+    "lkprf>=1.1.1",
+    "lmfit>=1.3.4",
+    "matplotlib>=3.10.8,<4.0.0",
+    "numpy>=1.26.4,<2.0.0",
+]
+
+[project.scripts]
+incinerator = "incinerator:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.0",
+]
