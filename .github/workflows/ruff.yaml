@@ -26,6 +26,6 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync
-			
+
       - name: Run Ruff
         run: make ruff-check
