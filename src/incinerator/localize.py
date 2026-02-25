@@ -1,15 +1,23 @@
 #do i need to import os? 
 
-import numpy as np
+import lkprf
 import matplotlib.pyplot as plt
-from lmfit.models import Gaussian2dModel
-from lmfit import Parameters, minimize
+import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
-import lkprf
-from matplotlib import colors
+from lmfit import Parameters, minimize
+from lmfit.models import Gaussian2dModel
 
-from .utils import *
+from .utils import (
+    all_prf_residual,
+    coords_to_pixels,
+    create_polynomial_design_matrix,
+    create_spline_design_matrix,
+    get_p_tdur_t0,
+    prf_residual,
+    query_vizier_background,
+)
+
 
 #initializing Class
 class Localize(object):
@@ -151,7 +159,7 @@ class Localize(object):
 
 
     #THIS NEEDS TO BE FINISHED
-    def _get_tess_prf():
+    def _get_tess_prf(self):
     #this will be added in, in the future
         print('YAY TESS, this will be added later!')
         return 1.
@@ -356,7 +364,7 @@ class Localize(object):
             if which_tce is not None:
 
                 #constraining the amplitude param
-                params.add(f'amplitude',value=np.nanmax(amp[which_tce]),min=0)
+                params.add('amplitude',value=np.nanmax(amp[which_tce]),min=0)
                 
                 #inputs for prf_residual function
                 prf_fit_kw = {'prf':self.prf,'data':amp[which_tce],'data_err':amp_err[which_tce],
@@ -392,7 +400,7 @@ class Localize(object):
             #constraining params
             params.add('centery', value=pix_row, min=0, max=self.shape[0]-1)
             params.add('centerx', value=pix_col, min=0, max=self.shape[1]-1)
-            params.add(f'amplitude',value=np.nanmax(amp[which_tce]),min=0)
+            params.add('amplitude',value=np.nanmax(amp[which_tce]),min=0)
 
             #minimizing to get the best fit results
             result = minimize(model_func,params,kws=fit_kw)
@@ -531,7 +539,7 @@ class Localize(object):
         cbar2.ax.tick_params(labelsize=13)
         cbar2.set_label('Flux [e-/sec]', fontsize=16)
 
-        fig.text(0.5, -0.1, f'Offset = {self.offset:.3f}$\sigma$', ha='center',fontsize=14)
+        fig.text(0.5, -0.1, rf'Offset = {self.offset:.3f}$\sigma$', ha='center',fontsize=14)
         
         if self.mission=='kepler':
             cat_name='KIC'
@@ -542,7 +550,7 @@ class Localize(object):
         
         plt.suptitle('INCINERATOR Report for '+cat_name+' '+self.id+'.0'+str(which_tce+1), fontsize=18)
 
-        if savefig == True:
+        if savefig:
             plt.savefig(save_directory+'/incinerator_report_'+cat_name+self.id+'.0'+str(which_tce+1)+'.png', dpi=200, pad_inches=0.5, bbox_inches='tight')
 
 

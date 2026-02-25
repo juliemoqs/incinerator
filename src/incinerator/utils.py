@@ -1,14 +1,11 @@
 #do i need to import os? 
 
-import numpy as np
-from astropy.coordinates import SkyCoord
-from astroquery.gaia import Gaia
-from astroquery.mast import Catalogs
-from astroquery.vizier import Vizier
 import astropy.units as u
+import numpy as np
+from astropy.coordinates import Angle, SkyCoord
+from astroquery.gaia import Gaia
+from astroquery.vizier import Vizier
 from lamatrix import Spline
-from astropy.coordinates import Angle
-
 
 
 def get_p_tdur_t0(tce):
@@ -131,7 +128,7 @@ def query_vizier_background(wcs,ra_targ,dec_targ,tpf_shape):
 def prf_residual(params,prf,data,data_err,origin,shape):#(params, prf, data, data_err):
 
     #extracting parameter values
-    amp = params[f'amplitude'].value
+    amp = params['amplitude'].value
     row_pix = params['centery'].value
     col_pix = params['centerx'].value
 

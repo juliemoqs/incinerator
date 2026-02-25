@@ -1,11 +1,8 @@
-def main() -> None:
-    print("Hello from incinerator!")
-
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 import logging
+import os
 from importlib import metadata
 
 #configure the logging

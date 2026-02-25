@@ -1,11 +1,11 @@
-.PHONY: all pytest mypy ruff-check ruff-check-fix ruff-format
+.PHONY: all pytest mypy ruff-check ruff-check-fix ruff-format isort
 
 CMD:=uv run
 PYMODULE:=src
 TESTS:=tests
 
 # Run all the checks which do not change files
-all: pytest mypy ruff-check ruff-check-fix ruff-format build 
+all: pytest mypy ruff-check ruff-check-fix ruff-format build serve deploy
 
 # Run tests using pytest
 pytest:

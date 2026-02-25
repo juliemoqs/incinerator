@@ -1,18 +1,22 @@
 """Test the Localization Method"""
 
-import incinerator.localize as loc
-from incinerator.utils import coords_to_pixels
-from astropy.io import fits
-import pandas as pd
 import numpy as np
+import pandas as pd
+from astropy.io import fits
+from astropy.utils.data import get_pkg_data_filename
+
+import incinerator.localize as loc
+from incinerator.localize import Localize
+from incinerator.utils import coords_to_pixels
+
+file_name = get_pkg_data_filename("data/test.fits.gz")
 
 
 def test_load_tpf_info():
     """
     Making sure that header is being properly read
     """
-    file_name = "data/test.fits.gz"
-    info = loc._get_kepler_tpf_info(file_name)
+    info = Localize._get_kepler_tpf_info(file_name)
 
     #testing info is accurately taken from hdulist
     assert info['ra_targ'] == 281.28812
@@ -25,9 +29,8 @@ def test_load_tpf_info():
 
 def test_localize():
     """
-    Check that the localize functions work
+    Check that the Localize class methods work
     """
-    file_name = "data/test.fits.gz"
     hdulist = fits.open(file_name)
 
     #extract time, flux cube, and flux cube error
@@ -36,7 +39,7 @@ def test_localize():
     flux_err = hdulist[1].data['FLUX_ERR']
     
     #testing dimensions of flux, time, and flux_err
-    assert (flux.ndim == 3 and flux_err.ndmi == 3)
+    assert (flux.ndim == 3 and flux_err.ndim == 3)
     assert (time.size == flux.shape[0] and time.size == flux_err.shape[0])
 
     tces = pd.DataFrame({'star_id':6922244.01,
