@@ -9,11 +9,47 @@ from lamatrix import Spline
 
 
 def get_p_tdur_t0(tce):
+    """
+    Extract the orbital period, transit duration, and transit epoch (t0)
+    from a TCE NumPy array.
+
+    Parameters
+    ----------
+    tce : numpy.ndarray
+        One-dimensional array containing TCE parameters in a fixed order.
+        This function assumes:
+            tce[1] = orbital period
+            tce[4] = transit duration
+            tce[3] = transit epoch (t0)
+
+    Returns
+    -------
+    tuple : 
+        A tuple (period, tdur, t0).
+    """
     return tce[1], tce[4], tce[3]
 
 
 
 def create_spline_design_matrix(time,tdur,order=3):
+    """
+    Construct a spline design matrix for a normalized time series.
+
+    Parameters
+    ----------
+    time : numpy.ndarray
+        One-dimensional array of time values.
+    tdur : float
+        Transit duration in the same units as `time`. Used to set
+        the knot spacing.
+    order : int, optional
+        Order of the spline (default is 3 for cubic splines).
+
+    Returns
+    -------
+    numpy.ndarray :
+        The spline design matrix evaluated at the normalized time values.
+    """
 
     #normalizing the time range
     t = (time - time.mean())/(time.max() - time.min())
@@ -39,6 +75,20 @@ def create_CBV_design_matrix(time,mask):
 
 
 def create_polynomial_design_matrix(time):
+    """
+    Construct a piecewise quadratic polynomial design matrix.
+
+    Parameters
+    ----------
+    time : numpy.ndarray
+        One-dimensional array of time values.
+
+    Returns
+    -------
+    numpy.ndarray : 
+        Piecewise polynomial design matrix with separate quadratic
+        trends for each continuous time segment.
+    """
 
     #normalizing the time range
     t = (time - time.mean())/(time.max() - time.min())
@@ -64,6 +114,24 @@ def create_polynomial_design_matrix(time):
 
 
 def coords_to_pixels(wcs,ra,dec):
+    """
+    Convert sky coordinates (RA, Dec) to detector pixel coordinates.
+
+    Parameters
+    ----------
+    wcs : astropy.wcs.WCS
+        World Coordinate System transformation object.
+    ra : float 
+        Right ascension in degrees.
+    dec : float
+        Declination in degrees.
+
+    Returns
+    -------
+    tuple : 
+        (pix_col, pix_row) pixel coordinates corresponding to the
+        input sky coordinates.
+    """
 
     #initializing skycoord object
     coord = SkyCoord(ra, dec, unit='deg')
@@ -77,8 +145,30 @@ def coords_to_pixels(wcs,ra,dec):
 
 
 
-#ADD A CACHE -- OKAY MAYBE NO CACHE USE VIZIER INSTEAD
+#ADD A CACHE
 def query_gaia_background(wcs,ra_targ,dec_targ,radius=25):
+    """
+    Query Gaia sources around a target coordinate and convert them to pixels.
+
+    Parameters
+    ----------
+    wcs : astropy.wcs.WCS
+        World Coordinate System transformation object.
+    ra_targ : float
+        Target right ascension in degrees.
+    dec_targ : float
+        Target declination in degrees.
+    radius : float, optional
+        Cone search radius in arcseconds (default 25).
+
+    Returns
+    -------
+    coord_bkgd : astropy.coordinates.SkyCoord
+        Sky coordinates of Gaia sources within the search radius.
+    pix_bkgd : tuple
+        Pixel coordinates of the sources as returned by WCS
+        (typically arrays of x and y positions).
+    """
 
     #initializing skycoord object using the Kepler target coords
     coord = SkyCoord(ra=ra_targ, dec=dec_targ, unit=(u.degree, u.degree), frame='icrs')
@@ -95,8 +185,32 @@ def query_gaia_background(wcs,ra_targ,dec_targ,radius=25):
     return coord_bkgd, pix_bkgd
 
 
-
+#ADD A CACHE
 def query_vizier_background(wcs,ra_targ,dec_targ,tpf_shape):
+    """
+    Query background sources from Vizier and convert them to pixel coordinates.
+
+    Parameters
+    ----------
+    wcs : astropy.wcs.WCS
+        World Coordinate System transformation object.
+    ra_targ : float
+        Target right ascension in degrees.
+    dec_targ : float
+        Target declination in degrees.
+    tpf_shape : tuple 
+        Shape of the target pixel file (e.g., (n_rows, n_cols)),
+        used to estimate the search radius.
+
+    Returns
+    -------
+    coord_bkgd : astropy.coordinates.SkyCoord or None
+        Sky coordinates of catalog sources within the search region,
+        or None if no sources are found.
+    pix_bkgd : tuple
+        Pixel coordinates of the sources as returned by WCS
+        (arrays of x and y positions).
+    """
 
     #initializing skycoord object using the kepler target coords
     coord = SkyCoord(ra=ra_targ, dec=dec_targ, unit=(u.degree, u.degree), frame='icrs')
@@ -126,6 +240,29 @@ def query_vizier_background(wcs,ra_targ,dec_targ,tpf_shape):
 
 
 def prf_residual(params,prf,data,data_err,origin,shape):#(params, prf, data, data_err):
+    """
+    Compute the flattened, uncertainty-weighted residual for PRF fitting.
+
+    Parameters
+    ----------
+    params : lmfit.Parameters
+        Fit parameters containing 'amplitude', 'centerx', and 'centery'.
+    prf : object
+        PRF model object with an `evaluate` method.
+    data : numpy.ndarray
+        2D array of observed pixel values.
+    data_err : numpy.ndarray
+        2D array of per-pixel uncertainties.
+    origin : tuple
+        (row_origin, col_origin) CCD reference position.
+    shape : tuple
+        Shape of the image stamp used for PRF evaluation.
+
+    Returns
+    -------
+    numpy.ndarray
+        Flattened array of finite, uncertainty-weighted residuals.
+    """
 
     #extracting parameter values
     amp = params['amplitude'].value
@@ -150,7 +287,33 @@ def prf_residual(params,prf,data,data_err,origin,shape):#(params, prf, data, dat
 
 
 def all_prf_residual(params,prf,data,data_err,origin,shape,tces):#(params, prf, data, data_err, origin, shape, tces):
-    
+    """
+    Compute concatenated, uncertainty-weighted residuals for multiple TCEs.
+
+    Parameters
+    ----------
+    params : lmfit.Parameters
+        Fit parameters containing 'centerx', 'centery', and
+        'amplitude_i' for each TCE index i.
+    prf : object
+        PRF model object with an `evaluate` method.
+    data : numpy.ndarray
+        Array of 2D pixel data for each TCE (shape: n_tces × rows × cols).
+    data_err : numpy.ndarray
+        Array of per-pixel uncertainties for each TCE.
+    origin : tuple
+        (row_origin, col_origin) CCD reference position.
+    shape : tuple
+        Shape of the image stamp used for PRF evaluation.
+    tces : sequence
+        Collection of TCEs used to determine the number of amplitudes.
+
+    Returns
+    -------
+    numpy.ndarray
+        Flattened array of finite, concatenated residuals across all TCEs.
+    """
+
     #initializing residuals list
     res = []
 

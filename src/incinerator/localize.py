@@ -27,6 +27,41 @@ class Localize(object):
                  wcs=None, mission=None, file_name=None, 
                  ra_bonus=None, dec_bonus=None,
                  ra_targ=None , dec_targ=None, prf=None):
+        """
+        Initialize the Localize object.
+
+        Parameters
+        ----------
+        time : numpy.ndarray
+            1D array of time values.
+        flux : numpy.ndarray
+            3D flux cube with shape (n_time, n_rows, n_cols).
+        flux_err : numpy.ndarray
+            3D array of per-pixel uncertainties matching `flux`.
+        tces : numpy.ndarray
+            Array of TCE parameters. Typically derived from a pandas
+            DataFrame and converted to a NumPy array (one row per TCE).
+        id : str
+            Target identifier. Do not include mission prefix (TIC/KIC/etc.)
+        wcs : astropy.wcs.WCS
+            WCS solution for pixel-to-sky transformations. If not provided, one is generated from file header for Kepler and TESS.
+        mission : str, optional
+            Mission name (e.g., 'kepler', 'tess').
+        file_name : str, optional
+            Path to a TPF or mission-specific file. Not optional for Kepler and TESS.
+        ra_bonus, dec_bonus : float, optional
+            Optional sky coordinate of a source different from the nominal mission target.
+        ra_targ, dec_targ : float
+            Target sky coordinates in degrees. If not provided, one is generated from file header for Kepler and TESS.
+        prf : object, optional
+            Precomputed PRF model. If not provided, one is generated for Kepler and TESS.
+
+        Raises
+        ------
+        ValueError
+            If flux is not 3D or time length does not match the flux cube.
+            Also raised if `file_name` is provided without `mission`.
+        """
         
         self.time = time
         self.flux = flux
@@ -65,6 +100,23 @@ class Localize(object):
     
  
     def _clean_data(self):
+        """
+        Remove invalid cadences and pixels from the flux cube.
+
+        Attributes Set
+        --------------
+        good_pix_mask : numpy.ndarray
+            Boolean mask identifying pixels with nonzero total flux.
+        good_cad_mask : numpy.ndarray
+            Boolean mask identifying cadences with finite time, flux,
+            and flux uncertainties.
+        pix : numpy.ndarray
+            Cleaned flux array containing only good cadences and pixels.
+        pix_err : numpy.ndarray
+            Cleaned uncertainty array matching `pix`.
+        time : numpy.ndarray
+            Filtered time array containing only good cadences.
+        """
         
         flux = self.flux
         time = self.time
@@ -88,7 +140,15 @@ class Localize(object):
     
 
     def load_tpf_info(self):
-        #mission = mission.lower()
+        """
+        Load mission-specific metadata from a target pixel file. The returned values are added directly to the object's
+        attributes.
+
+        Raises
+        ------
+        ValueError
+            If the mission is not supported.
+        """
 
         if self.mission == "kepler":
             info = self._get_kepler_tpf_info(self.file_name)
@@ -103,6 +163,25 @@ class Localize(object):
 
     @staticmethod
     def _get_kepler_tpf_info(file_name):
+        """
+        Extract relevant metadata from a Kepler target pixel file (TPF).
+
+        Parameters
+        ----------
+        file_name : str
+            Path to the Kepler TPF FITS file.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'ra_targ' : target right ascension (deg)
+            - 'dec_targ' : target declination (deg)
+            - 'wcs' : WCS solution
+            - 'channel' : CCD channel number
+            - 'origin_row' : detector row origin
+            - 'origin_col' : detector column origin
+        """
         
         #reads in the file 
         hdulist = fits.open(file_name)
@@ -131,6 +210,15 @@ class Localize(object):
     
 
     def get_prf_model(self):
+        """
+        Initialize and return the mission-specific PRF model.
+
+        Returns
+        -------
+        object or None
+            PRF model instance if supported, otherwise None.
+        """
+        
         if self.mission == 'kepler':
             #run get_kepler_prf
             prf = self._get_kepler_prf()
@@ -150,7 +238,15 @@ class Localize(object):
 
 
     def _get_kepler_prf(self):
+        """
+        Construct the Kepler PRF model for the target channel.
 
+        Returns
+        -------
+        lkprf.KeplerPRF
+            Kepler PRF model for the specified channel.
+        """
+        
         #initializing prf for the specific channel
         prf = lkprf.KeplerPRF(channel = self.channel)
 
@@ -167,6 +263,20 @@ class Localize(object):
 
 
     def _get_transit(self,which_tce):
+        """
+        Generate a transit model mask for a specified TCE.
+
+        Parameters
+        ----------
+        which_tce : int
+            Index of the TCE in `self.tces`.
+
+        Returns
+        -------
+        numpy.ndarray
+            1D array with value -1 during transit and 0 elsewhere,
+            evaluated at the object's time array.
+        """
         
         time = self.time
         #good_cad = self.good_cad_mask
@@ -185,44 +295,32 @@ class Localize(object):
         return transit
 
 
-#this is save in case we don't want to fit all transits at once
-    #def build_design_matrix(self, tce_num, method='spline', order=3):
-    #
-    #    period,tdur,t0 = get_p_tdur_t0(self.tces[tce_num])
-    #
-    #    time = self.time
-    #    good_cad = self.good_cad_mask
-#
-    #    #get transit
-    #    transit = self._get_transit(tce_num)
-#
-    #    #get the systematics portion
-    #    if method == 'spline':
-    #       #get spline portion
-    #        systematics = create_spline_design_matrix(time,good_cad,tdur,order=3)
-    #
-    #    elif method == 'CBV':
-    #        #get cbv portion
-    #        raise ValueError('Please use spline for the time being.')
-#
-    #    else:
-    #        raise ValueError('Method should be spline or CBV.')
-#
-#
-    #    #get piecewise polynomial portion -- generally stellar variability
-    #    polynomial = create_polynomial_design_matrix(time,good_cad)
-#
-    #    #combine piecewise trends, spline, and transit signal into a final design matrix
-    #    dM = np.hstack([transit[:, None], polynomial, systematics])
-#
-    #    self.design_matrix = dM
-
-
 
     def build_design_matrix(self, method='spline', order=3):
+        """
+        Construct the full design matrix.
+
+        Parameters
+        ----------
+        method : str, optional
+            Method used for the systematics component. Currently only
+            'spline' is supported.
+        order : int, optional
+            Order of the spline used when `method='spline'` (default 3).
+
+        Raises
+        ------
+        ValueError
+            If an unsupported method is provided.
+
+        Attributes set
+        ----
+        self.design_matrix : numpy.ndarray
+            Final design matrix combining transit, polynomial,
+            and systematics components.
+        """
         
         time = self.time
-        #good_cad = self.good_cad_mask
 
         tdur_list = []
         #iterating through all the tces
@@ -263,37 +361,20 @@ class Localize(object):
         self.design_matrix = dM
     
 
-
-    #def _solve_weights(self):
-    #    #idk if i want this because what if i wanna try a different design matrix? 
-    #    #if hasattr(self, "weights"):
-    #        #return  # already solved
-#
-    #    pix = self.pix
-    #    pix_err= self.pix_err
-    #    dM = self.design_matrix
-#
-    #    n_pix = pix.shape[1]
-    #
-    #    self.weights, self.weights_err = np.zeros((2, pix.shape[1], dM.shape[1]))
-#
-    #    print("Design matrix shape:", dM.shape)
-#
-    #    #solving for the weights
-    #    for idx, y, e in zip(range(n_pix), pix.T, pix_err.T):
-    #        sigma_w_inv = dM.T.dot(dM / e[:, None]**2)
-    #        print("Rank:", np.linalg.matrix_rank(sigma_w_inv))
-    #        print("Condition number:", np.linalg.cond(sigma_w_inv))
-    #        B = dM.T.dot(y / e**2)
-    #        self.weights[idx] = np.linalg.solve(sigma_w_inv, B)
-    #        self.weights_err[idx] = np.sqrt(np.diag(np.linalg.inv(sigma_w_inv)))        
-
     
     def _solve_weights(self):
-        #idk if i want this because what if i wanna try a different design matrix? 
-        #if hasattr(self, "weights"):
-            #return  # already solved
+        """
+        Solve for per-pixel linear model weights and uncertainties.
 
+        Attributes set
+        ----
+        self.weights : numpy.ndarray
+            Array of fitted weights with shape (n_pix, n_params).
+        self.weights_err : numpy.ndarray
+            Array of 1-sigma uncertainties on the fitted weights
+            with shape (n_pix, n_params).
+        """
+        
         pix = self.pix
         pix_err= self.pix_err
         dM = self.design_matrix
@@ -313,6 +394,22 @@ class Localize(object):
 
 
     def _solve_transit(self,which_tce):
+        """
+        Extract the spatial transit depth solution for a given TCE.
+
+        Parameters
+        ----------
+        which_tce : int
+            Index of the TCE in `self.tces` corresponding to the
+            transit component in the design matrix.
+
+        Returns
+        -------
+        transit_weight : numpy.ndarray
+            2D array of fitted transit depths per pixel.
+        transit_weight_err : numpy.ndarray
+            2D array of 1-sigma uncertainties on the transit depths.
+        """
 
         self._solve_weights()
         good_pix = self.good_pix_mask
@@ -327,6 +424,17 @@ class Localize(object):
 
 
     def solve_transit_weights(self):
+        """
+        Solve for the spatial transit depth maps for all TCEs.
+
+        Attributes set
+        ----
+        self.transit_weights : list of numpy.ndarray
+            List of 2D transit depth maps, one per TCE.
+        self.transit_weights_err : list of numpy.ndarray
+            List of 2D 1-sigma uncertainty maps corresponding to
+            each transit depth map.
+        """
 
         amps = []
         amps_err = []
@@ -341,8 +449,39 @@ class Localize(object):
 
 
     def fit_to_heatmap(self, model_func=None, which_tce = None, method=None,**fit_kw):
-        #MODEL_FUNC ONLY FOR CUSTOM 
-        #IF METHOD IS PRF NEED TO SET ALL TCES TO TRUE OR FALSE -- ADAPT CODE TO READ THIS TO CALL PRF OR ALL_PRF
+        """
+        Fit a model to the per-pixel transit depth heatmap.
+
+        The spatial transit depth map(s) are fit using one of the following:
+        - 'prf'        : Fit a mission PRF model (single TCE or joint fit).
+        - '2dgaussian' : Fit an unconstrained 2D Gaussian model.
+        - 'custom'     : Fit a user-supplied residual function.
+
+        Parameters
+        ----------
+        model_func : callable, optional
+            Custom residual function (used only if `method='custom'`).
+        which_tce : int, optional
+            Index of the TCE to fit. If None and `method='prf'`, a joint
+            PRF fit is performed across all TCEs.
+        method : str
+            Fitting method: 'prf', '2dgaussian', or 'custom'.
+        **fit_kw
+            Additional keyword arguments passed to the custom model.
+
+        Returns
+        -------
+        result : lmfit.ModelResult or lmfit.MinimizerResult
+            Full fit result object.
+        fit_metrics : dict
+            Dictionary containing key localization metrics:
+            - 'centerx', 'centery' : best-fit centroid position
+            - 'sigmax', 'sigmay'   : 1-sigma uncertainties on centroid
+        Raises
+        ------
+        ValueError
+            If an unsupported fitting method is provided.
+        """
         
         amp = self.transit_weights.copy()
         amp_err = self.transit_weights_err.copy()
@@ -450,9 +589,25 @@ class Localize(object):
 
 
 
-    #some type of report for the metrics, most specifically the sigma offset
     def get_offset(self,fit_metrics,pix_col,pix_row):
+        """
+        Compute the centroid offset in units of sigma.
 
+        Parameters
+        ----------
+        fit_metrics : dict
+            Dictionary containing fitted centroid values and uncertainties
+            ('centerx', 'centery', 'sigmax', 'sigmay').
+        pix_col : float
+            Reference pixel column position.
+        pix_row : float
+            Reference pixel row position.
+
+        Attributes set
+        ----
+        self.offset : float
+            Radial offset significance in units of sigma.
+        """
         #extract fit metrics
         x0 = fit_metrics['centerx']
         y0 = fit_metrics['centery']
@@ -471,7 +626,28 @@ class Localize(object):
 
 
     def _get_all_metrics(self,pix_col,pix_row,model_func=None, method='prf',**fit_kw):
-        #this can eventually be modified to add chi2 and whatever other metrics we want : )
+        """
+        Run heatmap fitting and return localization metrics.
+
+        Parameters
+        ----------
+        pix_col : float
+            Reference pixel column position.
+        pix_row : float
+            Reference pixel row position.
+        model_func : callable, optional
+            Custom residual function (used if `method='custom'`).
+        method : str, optional
+            Fitting method ('prf', '2dgaussian', or 'custom').
+        **fit_kw
+            Additional keyword arguments passed to the fitting routine.
+
+        Returns
+        -------
+        dict
+            Dictionary containing centroid positions, uncertainties,
+            and the radial offset significance ('offset').
+        """
         
         #getting the fit metrics
         _, fit_metrics = self.fit_to_heatmap(model_func=model_func, method=method,**fit_kw)
@@ -489,6 +665,21 @@ class Localize(object):
 
 
     def plot_heatmap(self,metrics,which_tce,savefig=False,save_directory='.'):
+        """
+        Generate a localization report plot for a given TCE.
+
+        Parameters
+        ----------
+        metrics : dict
+            Dictionary containing fitted centroid values and uncertainties
+            ('centerx', 'centery', 'sigmax', 'sigmay').
+        which_tce : int
+            Index of the TCE to visualize.
+        savefig : bool, optional
+            If True, save the figure to disk (default False).
+        save_directory : str, optional
+            Directory where the figure will be saved.
+        """
 
         #extracting metrics
         x0 = metrics['centerx']
@@ -556,7 +747,6 @@ class Localize(object):
 
     
     #THIS NEEDS TO BE ADDED
-    #need some type of visualization functionnnnn
     def get_localization_report(self):
 
         return 1.
