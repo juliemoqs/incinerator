@@ -9,5 +9,11 @@ dist/
 wheels/
 *.egg-info
 
+# zensical documentation
+/sites
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints
+
 # Virtual environments
 .venv

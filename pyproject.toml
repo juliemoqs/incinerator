@@ -2,7 +2,7 @@
 name = "incinerator"
 version = "0.1.0"
 description = "A pixel-level exoplanet transit vetting technique!"
-readme = "README.md"
+readme = "docs/README.md"
 authors = [
     { name = "Julie Moquin", email = "julie.moquin@nasa.gov" }, 
     { name = "Robert F. Wilson", email = "robert.f.wilson@nasa.gov" },
@@ -34,9 +34,13 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "ipykernel>=7.2.0",
+    "mkdocs-jupyter>=0.24.1",
+    "mkdocstrings>=1.0.3",
+    "mkdocstrings-python>=2.0.3",
     "mypy>=1.19.1",
     "pytest>=9.0.2",
     "ruff>=0.15.0",
+    "zensical>=0.0.24",
 ]
 
 [tool.ruff]

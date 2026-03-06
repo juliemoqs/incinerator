@@ -103,7 +103,7 @@ class Localize(object):
         """
         Remove invalid cadences and pixels from the flux cube.
 
-        Attributes Set
+        Attributes
         --------------
         good_pix_mask : numpy.ndarray
             Boolean mask identifying pixels with nonzero total flux.
@@ -313,7 +313,7 @@ class Localize(object):
         ValueError
             If an unsupported method is provided.
 
-        Attributes set
+        Attributes
         ----
         self.design_matrix : numpy.ndarray
             Final design matrix combining transit, polynomial,
@@ -366,7 +366,7 @@ class Localize(object):
         """
         Solve for per-pixel linear model weights and uncertainties.
 
-        Attributes set
+        Attributes
         ----
         self.weights : numpy.ndarray
             Array of fitted weights with shape (n_pix, n_params).
@@ -427,7 +427,7 @@ class Localize(object):
         """
         Solve for the spatial transit depth maps for all TCEs.
 
-        Attributes set
+        Attributes
         ----
         self.transit_weights : list of numpy.ndarray
             List of 2D transit depth maps, one per TCE.
@@ -603,7 +603,7 @@ class Localize(object):
         pix_row : float
             Reference pixel row position.
 
-        Attributes set
+        Attributes
         ----
         self.offset : float
             Radial offset significance in units of sigma.
@@ -704,27 +704,40 @@ class Localize(object):
 
         axes[0].plot(pix_col,pix_row, 'rx')
 
-        axes[0].errorbar(x0,y0,xerr=x0_err,yerr=y0_err,fmt='o',c='k',markersize=2,capsize=1.5)
+        axes[0].errorbar(x0,y0,xerr=x0_err,yerr=y0_err,fmt='o',c='k',markersize=4,capsize=1.5)
 
-        cax=axes[0].imshow(self.transit_weights[which_tce]/self.transit_weights_err[which_tce], cmap='inferno')#,vmin=0)
+        cax=axes[0].imshow(self.transit_weights[which_tce]/self.transit_weights_err[which_tce], cmap='inferno',origin='lower')#,vmin=0)
         axes[0].scatter(pix_bkgd[0],pix_bkgd[1],c='w',edgecolors='k',s=60)
         axes[0].tick_params(axis='both', labelsize=13)
         axes[0].set_xlabel('Pixel Number', fontsize=14)
+        #axes[0].yaxis.tick_right()
         axes[0].set_ylabel('Pixel Number', fontsize=14)
         #axes[0].set_title(f'Offset: {self.offset:.3f}$\sigma$',fontsize=14)
         
-        cbar1 = fig.colorbar(cax, ax=axes[0])
+        cbar1 = fig.colorbar(cax, ax=axes[0])#,location='left')
         cbar1.ax.tick_params(labelsize=13)
         cbar1.set_label('Depth / Depth Error', fontsize=16)
+        #cbar1.ax.yaxis.set_ticks_position('left')
 
 
-        cax1 = axes[1].imshow(np.nanmean(self.flux, axis=0))#, norm=colors.LogNorm()) 
+        cax1 = axes[1].imshow(np.nanmean(self.flux, axis=0),origin='lower')#, norm=colors.LogNorm()) 
         axes[1].plot(pix_col,pix_row, 'rx')
 
         axes[1].scatter(pix_bkgd[0],pix_bkgd[1],c='w',edgecolors='k',s=60)
         axes[1].tick_params(axis='both', labelsize=13)
         axes[1].set_xlabel('Pixel Number', fontsize=14)
         axes[1].set_ylabel('Pixel Number', fontsize=14)
+        
+        if self.shape[0] < 6 or self.shape[1] < 6:
+            axes[1].set_xticks(np.arange(0,self.shape[1],1))
+            axes[1].set_yticks(np.arange(0,self.shape[0],1))
+            axes[0].set_xticks(np.arange(0,self.shape[1],1))
+            axes[0].set_yticks(np.arange(0,self.shape[0],1))
+        else:
+            axes[1].set_xticks(np.arange(0,self.shape[1],2))
+            axes[1].set_yticks(np.arange(0,self.shape[0],2))
+            axes[0].set_xticks(np.arange(0,self.shape[1],2))
+            axes[0].set_yticks(np.arange(0,self.shape[0],2))
         
         cbar2 = fig.colorbar(cax1, ax=axes[1])
         cbar2.ax.tick_params(labelsize=13)
@@ -740,6 +753,8 @@ class Localize(object):
             cat_name='CANDIDATE'
         
         plt.suptitle('INCINERATOR Report for '+cat_name+' '+self.id+'.0'+str(which_tce+1), fontsize=18)
+
+        #plt.tight_layout()
 
         if savefig:
             plt.savefig(save_directory+'/incinerator_report_'+cat_name+self.id+'.0'+str(which_tce+1)+'.png', dpi=200, pad_inches=0.5, bbox_inches='tight')
