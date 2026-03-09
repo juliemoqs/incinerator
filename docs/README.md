@@ -1,6 +1,8 @@
 [![pytest](https://github.com/juliemoqs/incinerator/actions/workflows/pytest.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/pytest.yaml)
 [![mypy](https://github.com/juliemoqs/incinerator/actions/workflows/mypy.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/mypy.yaml/)
 [![ruff](https://github.com/juliemoqs/incinerator/actions/workflows/ruff.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/ruff.yaml)
+[![PyPI](https://img.shields.io/pypi/v/incinerator.svg)](https://pypi.python.org/pypi/incinerator)
+[![Generic badge](https://img.shields.io/badge/documentation-live-blue.svg)](https://juliemoqs.github.io/incinerator/)
 
 # INCInERATOr
 **I**ndicator of **N**onaligned **C**entroids **IN** **E**xoplanet **R**eliability **A**nalysis of **T**ransit **O**bse**R**vations
