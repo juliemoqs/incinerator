@@ -1,7 +1,7 @@
 [![pytest](https://github.com/juliemoqs/incinerator/actions/workflows/pytest.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/pytest.yaml)
 [![mypy](https://github.com/juliemoqs/incinerator/actions/workflows/mypy.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/mypy.yaml/)
 [![ruff](https://github.com/juliemoqs/incinerator/actions/workflows/ruff.yaml/badge.svg)](https://github.com/juliemoqs/incinerator/actions/workflows/ruff.yaml)
-[![PyPI](https://img.shields.io/pypi/v/incinerator.svg)](https://pypi.python.org/pypi/incinerator)
+[![PyPI version](https://img.shields.io/pypi/v/incinerator)](https://pypi.org/project/incinerator/)
 [![Generic badge](https://img.shields.io/badge/documentation-live-blue.svg)](https://juliemoqs.github.io/incinerator/)
 
 # INCInERATOr
