@@ -9,6 +9,7 @@ dist/
 wheels/
 *.egg-info
 site/
+gaia_cache/
 
 # zensical documentation
 /sites

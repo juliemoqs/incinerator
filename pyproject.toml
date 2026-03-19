@@ -16,6 +16,7 @@ requires-python = ">=3.12,<4.0"
 dependencies = [
     "astropy>=7.1.0,<8.0.0",
     "astroquery>=0.4.11",
+    "diskcache>=5.6.3",
     "lamatrix>=1.0.1",
     "lkprf>=1.1.1",
     "lmfit>=1.3.4",
