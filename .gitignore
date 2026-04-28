@@ -19,3 +19,4 @@ gaia_cache/
 
 # Virtual environments
 .venv
+.vscode
