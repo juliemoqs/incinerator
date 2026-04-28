@@ -12,10 +12,12 @@ authors = [
 license = "MIT"
 
 
-requires-python = ">=3.12,<4.0"
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "astropy>=7.1.0,<8.0.0",
     "astroquery>=0.4.11",
+    "batman-package>=2.5.3",
+    "cmasher>=1.9.2",
     "diskcache>=5.6.3",
     "lamatrix>=1.0.1",
     "lkprf>=1.1.1",
