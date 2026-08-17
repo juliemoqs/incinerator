@@ -1,12 +1,12 @@
 # `Localize`
 
-::: incinerator.Localize
+::: incinerator.localize.Localize
     handler: python
     options:
         summary: false
         members:
-            - load_tpf_info
-            - get_prf_model
+            - __init__
+            - from_tpf_info
             - build_design_matrix
             - solve_transit_weights
             - fit_to_heatmap

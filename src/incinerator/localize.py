@@ -2,13 +2,13 @@ import batman
 import lkprf
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
 from lmfit import Parameters, minimize
 from lmfit.models import Gaussian2dModel
 from matplotlib.gridspec import GridSpec
-from matplotlib.patches import Ellipse
 from scipy.spatial.distance import mahalanobis
 
 from .utils import (
@@ -28,49 +28,70 @@ from .utils import (
 #initializing Localize Class -- single quarter localization
 class Localize(object):
 
-    # ADD DATA TYPES AND TCES AS DATAFRAME NOT NUMPY ARRAY 
     #initiliazing -- data parser and loader
-    def __init__(self, time, flux, flux_err, tces, id, 
-                 wcs=None, mission=None, file_name=None, 
-                 ra_bonus=None, dec_bonus=None,
-                 ra_targ=None , dec_targ=None, 
-                 prf=None, epoch=None):
+    def __init__(self, time: np.ndarray, flux: np.ndarray,
+             flux_err: np.ndarray, tces: pd.DataFrame, id: str,
+             ra_targ: float,
+             dec_targ: float,
+             wcs: WCS, epoch: Time,
+             mission: str | None = None,
+             ra_bonus: float | None = None,
+             dec_bonus: float | None = None,
+             prf: object | None = None,
+             headers: list[fits.Header] | None = None,
+             **mission_keywords) -> None:
         """
         Initialize the Localize object.
 
         Parameters
         ----------
         time : numpy.ndarray
-            1D array of time values.
+            1D array of time values in BJD.
         flux : numpy.ndarray
             3D flux cube with shape (n_time, n_rows, n_cols).
         flux_err : numpy.ndarray
             3D array of per-pixel uncertainties matching `flux`.
-        tces : numpy.ndarray
-            Array of TCE parameters. Typically derived from a pandas
-            DataFrame and converted to a NumPy array (one row per TCE).
+        tces : pandas.DataFrame
+            DataFrame containing Threshold Crossing Event (TCE) information.
+            Must contain the columns `period`, `t0`, and `tdur`. The `period`
+            and `tdur` values must be in days, and `t0` must be in BJD.
         id : str
-            Target identifier. Do not include mission prefix (TIC/KIC/etc.)
+            Target identifier. Do not include the mission prefix (TIC/KIC/etc.).
+        ra_targ : float
+            J2000 right ascension of the target, in degrees.
+        dec_targ : float
+            J2000 declination of the target, in degrees.
         wcs : astropy.wcs.WCS
-            WCS solution for pixel-to-sky transformations. If not provided, one is generated from file header for Kepler and TESS.
+            WCS solution for pixel-to-sky transformations.
+        epoch : astropy.time.Time
+            Epoch of the input coordinates.
         mission : str, optional
             Mission name (e.g., 'kepler', 'tess').
-        file_name : str, optional
-            Path to a TPF or mission-specific file. Not optional for Kepler and TESS.
-        ra_bonus, dec_bonus : float, optional
-            Optional J2000 sky coordinate of a source different from the nominal mission target. 
-        ra_targ, dec_targ : float
-            J2000 target sky coordinates in degrees. If not provided, one is generated from file header for Kepler and TESS.
+        ra_bonus : float, optional
+            J2000 right ascension of a source different from the nominal
+            mission target, in degrees.
+        dec_bonus : float, optional
+            J2000 declination of a source different from the nominal
+            mission target, in degrees.
         prf : object, optional
-            Precomputed PRF model. If not provided, one is generated for Kepler and TESS.
-        epoch : astropy.time.Time, optional
-            Epoch of the input coordinate. If not provided, one is generated for Kepler and TESS.
+            Precomputed PRF model.
+        headers : list of astropy.io.fits.Header, optional
+            FITS headers from the original FITS file. Each entry corresponds
+            to the header of a single HDU.
+        **mission_keywords
+            Additional mission-specific keyword arguments stored directly in
+            the instance dictionary. Common entries include sector/quarter,
+            channel, CCD, camera, and other instrument metadata required for
+            PRF evaluation.
 
         Raises
         ------
         ValueError
-            If flux is not 3D or time length does not match the flux cube.
-            Also raised if `file_name` is provided without `mission`.
+            If `flux` is not 3D, if the length of `time` does not match the
+            first axis of `flux`, or if `tces` does not contain the required
+            columns.
+        TypeError
+            If `tces` is not a pandas DataFrame.
         """
         
         self.time = time
@@ -81,276 +102,199 @@ class Localize(object):
         self.mission = mission
         self.ra_bonus = ra_bonus
         self.dec_bonus = dec_bonus
-        self.file_name = file_name
         self.ra_targ = ra_targ
         self.dec_targ = dec_targ
         self.prf = prf
         self.id = id
-        self.shape = self.flux.shape[1:]
+        self.headers = headers
+        self.epoch = epoch
 
-        #making sure data cube is 3D
+        self.origin_row: float | None = None
+        self.origin_col: float | None = None
+        self.quarter: int | None = None
+        self.sector: int | None = None
+        self.weights: np.ndarray | None = None
+        self.weights_err: np.ndarray | None = None
+
+        self.__dict__.update(mission_keywords)
+
+        #checking data types and shapes
+        if not isinstance(self.tces, pd.DataFrame):
+            raise TypeError("tces must be a pandas DataFrame")
+
         if self.flux.ndim != 3:
-            raise ValueError("Flux must be a 3D array: (time,y,x)")
+            raise ValueError("Flux must be a 3D array: (time, y, x)")
+
         if self.flux.shape[0] != self.time.size:
             raise ValueError("Time length must match flux first axis")
-        
-        #getting information for Kepler tpf or TESS tesscube
-        if file_name is not None:
-            if mission is None:
-                raise ValueError("mission must be specified when providing file_name")
 
-            self.load_tpf_info()
+        required_tce_columns = {"period", "t0", "tdur"}
+        if not required_tce_columns.issubset(self.tces.columns):
+            raise ValueError(f"tces must contain the columns: {required_tce_columns}")
 
-        #getting the epoch of the observation
-        if mission == "kepler":
-            self.epoch = Time(np.nanmedian(self.time) + 2454833, format='jd')
-        
-        elif mission == "tess":
-            self.epoch = Time(np.nanmedian(self.time) + 2457000, format='jd')
-        
-        else:
-            if epoch is None:
-                raise ValueError("Please provide an astropy Time object for epoch.")
-            else:
-                self.epoch = epoch
+        self.shape = self.flux.shape[1:]
 
-        #need to get the prf model
-        self.prf = self.get_prf_model()
-
-        #search for nearby stars and propagate all coordinates
+        #search for nearby stars and propagate coordinates
         self._search_and_propagate()
 
-        #cleaning the data
+        #clean the data
         self._clean_data()
 
+
     
- 
-    def _clean_data(self):
-        """
-        Remove invalid cadences and pixels from the flux cube.
-
-        Attributes
-        --------------
-        good_pix_mask : numpy.ndarray
-            Boolean mask identifying pixels with nonzero total flux.
-        good_cad_mask : numpy.ndarray
-            Boolean mask identifying cadences with finite time, flux,
-            and flux uncertainties.
-        pix : numpy.ndarray
-            Cleaned flux array containing only good cadences and pixels.
-        pix_err : numpy.ndarray
-            Cleaned uncertainty array matching `pix`.
-        time : numpy.ndarray
-            Filtered time array containing only good cadences.
-        """
-        
-        flux = self.flux
-        time = self.time
-        flux_err = self.flux_err
-
-        #good pixels: exclude NaNs and zeros
-        good_pix = np.nansum(flux, axis=0) != 0
-        #good cadences: time, flux, and flux_err is finite
-        good_cad = np.isfinite(time) & np.isfinite(flux[:, good_pix]).all(axis=(1)) & np.isfinite(flux_err[:, good_pix]).all(axis=(1))
-
-        #save masks for later
-        self.good_pix_mask = good_pix
-        self.good_cad_mask = good_cad
-
-        #extract the flux and flux_err arrays only for good pixels and finite times
-        self.pix = flux[good_cad][:, good_pix]
-        self.pix_err = flux_err[good_cad][:, good_pix]
-        
-        self.time = time[good_cad]
-        
-    
-    # REMOVE THIS!
-    def load_tpf_info(self):
-        """
-        Load mission-specific metadata from a target pixel file. The returned values are added directly to the object's
-        attributes.
-
-        Raises
-        ------
-        ValueError
-            If the mission is not supported.
-        """
-
-        if self.mission == "kepler":
-            info = self._get_kepler_tpf_info(self.file_name)
-        elif self.mission == "tess":
-            info = self._get_tesscut_info(self.file_name)
-        else:
-            raise ValueError(f"Unsupported mission: {self.mission}")
-
-        self.__dict__.update(info)
-
-
-    #MAKE THIS GENERAL AND ASK FOR MISSION -- RETURN THE LOCALIZE OBJECT
     @staticmethod
-    def from_kepler_tpf_info(file_name):
+    def from_tpf_info(filename: str, tces: pd.DataFrame, id: str,
+                  mission: str, ra_bonus: float | None = None,
+                  dec_bonus: float | None = None) -> "Localize":
         """
-        Extract relevant metadata from a Kepler target pixel file (TPF).
-
+        Create a Localize object from a Kepler or TESS Target Pixel File (TPF).
+    
         Parameters
         ----------
-        file_name : str
-            Path to the Kepler TPF FITS file.
-
+        filename : str
+            Path to the TPF FITS file.
+        tces : pandas.DataFrame
+            DataFrame containing Threshold Crossing Event (TCE) information
+            associated with the target.
+        id : str
+            Identifier for the target.
+        mission : str
+            Name of the mission ('kepler' or 'tess').
+        ra_bonus : float, optional
+            J2000 right ascension of a source different from the nominal
+            mission target, in degrees.
+        dec_bonus : float, optional
+            J2000 declination of a source different from the nominal
+            mission target, in degrees.
+    
         Returns
         -------
-        dict
-            Dictionary containing:
-            - 'ra_targ' : target right ascension (deg)
-            - 'dec_targ' : target declination (deg)
-            - 'wcs' : WCS solution
-            - 'channel' : CCD channel number
-            - 'origin_row' : detector row origin
-            - 'origin_col' : detector column origin
-            - 'quarter' : observation quarter number
-            - 'headers' : a list of headers, one per HDU in the FITS file. Includes the primary header and all extension headers.
+        Localize
+            Initialized Localize object containing the data and metadata
+            extracted from the TPF.
         """
         
-        #reads in the file 
-        hdulist = fits.open(file_name)
-
-        #gets all the info we need whoop whoop
-        info = {'ra_targ': hdulist[0].header['ra_obj'],
-                'dec_targ': hdulist[0].header['dec_obj'],
-                'wcs': WCS(hdulist[2].header),
-                'channel': hdulist[0].header['channel'],
-                'origin_row': hdulist[1].header['2CRV4P'],
-                'origin_col': hdulist[1].header['1CRV4P'],
-                'quarter': hdulist[0].header['quarter'],
-                'headers':[hdu.header for hdu in hdulist]}
-
-        hdulist.close()
-
-        return info
-    
-
-
-    @staticmethod
-    def _get_tesscut_info(file_name):
-        """
-        Extract relevant metadata from a TESSCUT file.
-
-        Parameters
-        ----------
-        file_name : str
-            Path to the TESSCUT FITS file.
-
-        Returns
-        -------
-        dict
-            Dictionary containing:
-            - 'ra_targ' : target right ascension (deg)
-            - 'dec_targ' : target declination (deg)
-            - 'wcs' : WCS solution
-            - 'camera' : Camera number
-            - 'ccd' : CCD Chip number
-            - 'origin_row' : detector row origin
-            - 'origin_col' : detector column origin
-            - 'sector' : observation sector number
-            - 'headers' : a list of headers, one per HDU in the FITS file. Includes the primary header and all extension headers.
-        """
+        mission = mission.lower()
+        if mission not in {"kepler", "tess"}:
+            raise ValueError("mission must be 'kepler' or 'tess'")
 
         #reads in the file 
-        hdulist = fits.open(file_name)
+        with fits.open(filename) as hdulist:
 
-        #gets all the info we need whoop whoop
-        info = {'ra_targ': hdulist[0].header['ra_obj'],
-                'dec_targ': hdulist[0].header['dec_obj'],
-                'wcs': WCS(hdulist[2].header),
-                'camera': hdulist[0].header['camera'],
-                'ccd': hdulist[0].header['ccd'],
-                'origin_row': hdulist[1].header['2CRV4P'],
-                'origin_col': hdulist[1].header['1CRV4P'],
-                'sector' : hdulist[0].header['sector'],
-                'headers':[hdu.header for hdu in hdulist]}
+            time = hdulist[1].data['time']
+            flux = hdulist[1].data['flux']
+            flux_err = hdulist[1].data['flux_err']
 
-        hdulist.close()
+            headers = [hdu.header for hdu in hdulist]
 
-        return info
+            #gets all the info we need whoop whoop
+            ra_targ= hdulist[0].header['ra_obj']
+            dec_targ = hdulist[0].header['dec_obj']
+            wcs = WCS(hdulist[2].header)
+            origin_row = hdulist[1].header['2CRV4P']
+            origin_col = hdulist[1].header['1CRV4P']
+
+            if mission == 'kepler':
+                channel = hdulist[0].header['channel']
+                quarter = hdulist[0].header['quarter']
+
+                time_offset = 2454833 
+
+                #initializing prf for the specific channel
+                prf = lkprf.KeplerPRF(channel = channel)
+
+                mission_keywords = {'channel':channel,
+                                        'origin_row':origin_row,
+                                        'origin_col':origin_col,
+                                        'quarter':quarter}
+
+            elif mission == 'tess':
+                camera = hdulist[0].header['camera']
+                ccd = hdulist[0].header['ccd']
+                sector = hdulist[0].header['sector']
+
+                time_offset = 2457000
+
+                #initializing prf for the specific camera and ccd chip 
+                prf = lkprf.TESSPRF(camera = camera, ccd = ccd)
+
+                mission_keywords = {'camera':camera,'ccd':ccd,
+                                    'origin_row':origin_row,
+                                    'origin_col':origin_col,
+                                    'sector':sector}
+
+
+        #getting the epoch of the observation
+        epoch = Time(np.nanmin(time) + time_offset, format='jd')
+
+        #converting time to bjd
+        time = time + time_offset 
+
+        return Localize(time, flux, flux_err, tces, id=id, wcs=wcs, mission=mission,
+                        ra_bonus=ra_bonus, dec_bonus=dec_bonus, ra_targ=ra_targ, dec_targ=dec_targ,
+                        prf=prf, epoch=epoch, headers=headers,**mission_keywords)
+
+
+
+    def _clean_data(self) -> None:
+            """
+            Remove invalid cadences and pixels from the flux cube.
     
+            Attributes
+            ----------
+            good_pix_mask : numpy.ndarray
+                2D boolean mask identifying pixels with nonzero total flux.
+            good_cad_mask : numpy.ndarray
+                1D boolean mask identifying cadences with finite time, flux,
+                and flux uncertainties.
+            pix : numpy.ndarray
+                2D cleaned flux array with shape
+                (n_good_cadences, n_good_pixels).
+            pix_err : numpy.ndarray
+                2D cleaned uncertainty array matching `pix`.
+            time : numpy.ndarray
+                Filtered time array containing only good cadences.
+            """
+            
+            flux = self.flux
+            time = self.time
+            flux_err = self.flux_err
     
-
-    def get_prf_model(self):
-        """
-        Initialize and return the mission-specific PRF model.
-
-        Returns
-        -------
-        object or None
-            PRF model instance if supported, otherwise None.
-        """
-        
-        if self.mission == 'kepler':
-            #run get_kepler_prf
-            prf = self._get_kepler_prf()
-
-        elif self.mission == 'tess':
-            #run get_tess_prf
-            prf = self._get_tess_prf()
-
-        else:
-            return
-
-        return prf
-
-
-
-    def _get_kepler_prf(self):
-        """
-        Construct the Kepler PRF model for the target channel.
-
-        Returns
-        -------
-        lkprf.KeplerPRF
-            Kepler PRF model for the specified channel.
-        """
-        
-        #initializing prf for the specific channel
-        prf = lkprf.KeplerPRF(channel = self.channel)
-
-        return prf
-
-
-
-    def _get_tess_prf(self):
-        """
-        Construct the TESS PRF model for the target camera and ccd chip.
-
-        Returns
-        -------
-        lkprf.TESSPRF
-            TESS PRF model for the specified camera and ccd chip.
-        """
-
-        #initializing prf for the specific camera and ccd chip 
-        prf = lkprf.TESSPRF(camera = self.camera, ccd = self.ccd)
-
-        return prf
+            #good pixels: exclude NaNs and zeros
+            good_pix = np.nansum(flux, axis=0) != 0
+            #good cadences: time, flux, and flux_err is finite
+            good_cad = np.isfinite(time) & np.isfinite(flux[:, good_pix]).all(axis=(1)) & np.isfinite(flux_err[:, good_pix]).all(axis=(1))
     
+            #save masks for later use
+            self.good_pix_mask = good_pix
+            self.good_cad_mask = good_cad
+    
+            #extract the good cadences and pixels
+            self.pix = flux[good_cad][:, good_pix]
+            self.pix_err = flux_err[good_cad][:, good_pix]
+            self.time = time[good_cad]
 
 
-    def _search_and_propagate(self):
+
+    def _search_and_propagate(self) -> None:
         """
         Query Gaia around the target and propagate coordinates to the
         observation epoch.
-
+    
         Attributes
-        -------
+        ----------
         gaia_sources : astropy.table.Table
             Gaia sources returned from the cone search.
         gaia_coord : astropy.coordinates.SkyCoord
-            Gaia source coordinates at the observation epoch.
-        gaia_pix : ndarray
+            Gaia source coordinates propagated to the observation epoch.
+        gaia_pix : numpy.ndarray
             Pixel coordinates of the Gaia sources.
         ra_targ, dec_targ : float
-            Target coordinates propagated to the observation epoch.
+            Target coordinates in degrees propagated to the observation
+            epoch.
         ra_bonus, dec_bonus : float
-            Bonus coordinates propagated to the observation epoch if provided.
+            Bonus source coordinates in degrees propagated to the
+            observation epoch, if provided.
         """
 
         #doing a cone search by querying gaia dr3 with vizier -- search is cached
@@ -368,7 +312,7 @@ class Localize(object):
 
 
 
-    def _get_transit(self,which_tce,method='box',tdur_frac=3.,**batman_kws):
+    def _get_transit(self, which_tce: int, method: str = "box", tdur_frac: float = 3.0, **batman_kws) -> np.ndarray:
         """
         Generate a transit model mask for a specified TCE.
 
@@ -376,17 +320,34 @@ class Localize(object):
         ----------
         which_tce : int
             Index of the TCE in `self.tces`.
+        method : str, optional
+            Method used to generate the transit model. Options are
+            ``"box"`` or ``"batman"``. Default is ``"box"``.
+        tdur_frac : float, optional
+            Factor used to determine the width of the box-shaped transit
+            mask. The transit mask extends to ``tdur / tdur_frac`` from
+            the transit center. Default is 3.0.
+        **batman_kws
+            Additional parameters required to generate the ``batman`` transit
+            model. Required keywords are ``rp``, ``a``, ``inc``, ``ecc``,
+            ``w``, ``u``, and ``limb_dark``.
 
         Returns
         -------
         numpy.ndarray
-            1D array with value -1 during transit and 0 elsewhere,
-            evaluated at the object's time array.
+            1D transit model evaluated at the object's time array. For
+            the box model, values are -1 during transit and 0 elsewhere.
+            For the ``batman`` model, the transit flux is shifted so that the
+            out-of-transit baseline is approximately 0.
+
+        Raises
+        ------
+        ValueError
+            If `method` is not ``"box"`` or ``"batman"``.
         """
         
         time = self.time
-        #good_cad = self.good_cad_mask
-        period,tdur,t0 = get_p_tdur_t0(self.tces[which_tce])
+        period,tdur,t0 = get_p_tdur_t0(self.tces.iloc[which_tce])
 
         #fold lc
         ph = ((time - t0)) % period
@@ -420,46 +381,60 @@ class Localize(object):
 
             flux = m.light_curve(params)
 
-            #creating transit mask for design-matrix
-            transit = flux - np.median(flux) #out of transit baseline needs to be at 0
-
+            #shift out-of-transit baseline to 0 for the design matrix
+            transit = flux - np.median(flux)
 
         else:
-            raise ValueError('Method should be box or batman')
-
+            raise ValueError("method must be 'box' or 'batman'")
 
         return transit
 
 
 
-    def build_design_matrix(self, order=3, spacing_mult = 3., tdur_frac = 3., transit_method='box',batman_kws=None,cbv=False):
+    def build_design_matrix(self, order: int = 3, spacing_mult: float = 3.0,
+                        tdur_frac: float = 3.0, transit_method: str = "box",
+                        batman_kws: list[dict] | None = None) -> None:
         """
         Construct the full design matrix.
 
         Parameters
         ----------
         order : int, optional
-            Order of the spline used when `method='spline'` (default 3).
-        spacing_mult : int, optional
-            Multiplier applied to the transit duration (tdur) to set spline knot spacing when `method='spline'` (default 3.).
+            Order of the spline used to model short-term variability.
+            Default is 3.
+        spacing_mult : float, optional
+            Multiplier applied to the maximum transit duration to set the
+            spline knot spacing. Default is 3.0.
+        tdur_frac : float, optional
+            Factor used to determine the width of the box-shaped transit
+            model. The transit mask extends to ``tdur / tdur_frac`` from
+            the transit center. Default is 3.0.
         transit_method : str, optional
-            Method used for the transit component. Supports 'box' and 'batman'. Default is 'box'.
-        batman_kws : list, optional
-            List of dictionaries for each tce of additional arguments passed to the `batman` transit model when `'transit_method='batman'`.
+            Method used to generate the transit component. Options are
+            ``"box"`` and ``"batman"``. Default is ``"box"``.
+        batman_kws : list of dict, optional
+            List of dictionaries containing additional arguments passed to
+            the ``batman`` transit model. One dictionary is required for
+            each TCE when ``transit_method="batman"``.
 
         Raises
         ------
         ValueError
-            If an unsupported `transit_method` is provided.
+            If `transit_method` is not ``"box"`` or ``"batman"``, or if
+            `transit_method="batman"` and `batman_kws` is not provided.
 
         Attributes
-        ----
-        self.valid_tces : numpy.ndarray
-            Indices of self.tces that produced non-zero transit models and are included as columns in the design matrix.
-        self.tce_mapping : dict
-            Mapping of tce index in the tces dataframe to the column index in the design matrix. 
-        self.design_matrix : numpy.ndarray
-            Final design matrix combining transit, polynomial, and spline components.
+        ----------
+        valid_tces : numpy.ndarray
+            Indices of TCEs in `self.tces` that produce non-zero transit
+            models and are included as columns in the design matrix.
+        tce_mapping : dict
+            Mapping from TCE indices in the `self.tces` DataFrame to their
+            corresponding column indices in the design matrix.
+        design_matrix : numpy.ndarray or None
+            Final design matrix combining transit, polynomial, and spline
+            components. Set to None if no valid transits are found.
+    
         """
         
         time = self.time
@@ -468,12 +443,17 @@ class Localize(object):
 
         transit_cols = []
         valid_tce_indices = []
+        
         #iterating through all the tces
         for i in range(len(self.tces)):
-            period,tdur,t0 = get_p_tdur_t0(self.tces[i])
+            period,tdur,t0 = get_p_tdur_t0(self.tces.iloc[i])
             tdur_list.append(tdur)
             if transit_method == 'batman':
-                batman_kws_i = batman_kws[i]
+                if batman_kws is None:
+                    raise ValueError("batman_kws must be provided when transit_method='batman'")
+                else:
+                    batman_kws_i = batman_kws[i]
+                
                 #get transit
                 transit = self._get_transit(i,method=transit_method,**batman_kws_i)
 
@@ -487,25 +467,19 @@ class Localize(object):
                 transit_cols.append(transit[:, None])
                 #appending the tce index to keep track of valid tces for each quarter
                 valid_tce_indices.append(i)
-            
-            if len(transit_cols) > 0:
-                transits = np.hstack(transit_cols)
 
-            else:
-                #no transits in this quarter → skip quarter entirely
-                transits = None
-                self.valid_tces = []
-                self.design_matrix = None
-                return
+        if not transit_cols:
+            self.valid_tces = np.array([], dtype=int)
+            self.tce_mapping = {}
+            self.design_matrix = None
+            return
+
+        transits = np.hstack(transit_cols)
 
         tdur_long = np.nanmax(tdur_list)
 
         #get the piecewise spline portion -- short-term variability
         spline = create_spline_design_matrix(time,tdur_long,order,spacing_mult)
-        
-        if cbv is True:
-            #get cbv portion
-            raise ValueError('CBVs will be added in the future')
 
         #get piecewise polynomial portion -- long-term variability
         polynomial = create_polynomial_design_matrix(time)
@@ -519,24 +493,26 @@ class Localize(object):
     
 
     
-    def _solve_weights(self):
+    def _solve_weights(self) -> None:
         """
         Solve for per-pixel linear model weights and uncertainties.
 
         Attributes
-        ----
-        self.weights : numpy.ndarray
+        ----------
+        weights : numpy.ndarray or None
             Array of fitted weights with shape (n_pix, n_params).
-        self.weights_err : numpy.ndarray
-            Array of 1-sigma uncertainties on the fitted weights
-            with shape (n_pix, n_params).
+            Set to None if no design matrix is available.
+        weights_err : numpy.ndarray or None
+            Array of 1-sigma uncertainties on the fitted weights with
+            shape (n_pix, n_params). Set to None if no design matrix is
+            available.
         """
         
         pix = self.pix
         pix_err= self.pix_err
         dM = self.design_matrix
 
-        if self.design_matrix is None:
+        if dM is None:
             self.weights = None
             self.weights_err = None
             return
@@ -544,7 +520,8 @@ class Localize(object):
         n_pix = pix.shape[1]
         n_params = dM.shape[1]
     
-        self.weights, self.weights_err = np.zeros((2, n_pix, n_params))
+        self.weights = np.zeros((n_pix, n_params))
+        self.weights_err = np.zeros((n_pix, n_params))
 
         #solving for the weights
         for idx, y, e in zip(range(n_pix), pix.T, pix_err.T):
@@ -555,15 +532,16 @@ class Localize(object):
 
 
 
-    def _solve_transit(self,which_tce):
+    def _solve_transit(self, which_tce: int) -> tuple[np.ndarray, np.ndarray]:
         """
         Extract the spatial transit depth solution for a given TCE.
-
+    
         Parameters
         ----------
         which_tce : int
-            Index of the TCE corresponding to the transit component in the design matrix.
-
+            Index of the TCE corresponding to the transit component in
+            the design matrix.
+    
         Returns
         -------
         transit_weight : numpy.ndarray
@@ -575,6 +553,9 @@ class Localize(object):
         self._solve_weights()
         good_pix = self.good_pix_mask
 
+        if self.weights is None or self.weights_err is None:
+            raise RuntimeError("Weights were not initialized.")
+
         #getting the weights for the transit depth
         transit_weight, transit_weight_err = np.zeros((2, *self.flux.shape[1:])) * np.nan
         transit_weight[good_pix] = self.weights[:, which_tce]
@@ -584,7 +565,7 @@ class Localize(object):
     
 
 
-    def solve_transit_weights(self):
+    def solve_transit_weights(self) -> None:
         """
         Solve for the spatial transit depth maps for all TCEs.
 
@@ -599,9 +580,9 @@ class Localize(object):
 
         amps = []
         amps_err = []
-        for i in self.valid_tces:#range(len(self.tces)):
-            col_i = self.tce_mapping[i]
-            amp_i, amp_err_i = self._solve_transit(col_i)
+        for i in self.valid_tces:
+            tce_col = self.tce_mapping[i]
+            amp_i, amp_err_i = self._solve_transit(tce_col)
             amps.append(amp_i)
             amps_err.append(amp_err_i)
 
@@ -610,38 +591,43 @@ class Localize(object):
 
 
 
-    def fit_to_heatmap(self, model_func=None, which_tce = None, method=None,**fit_kw):
+    def fit_to_heatmap(self,model_func=None,which_tce: int | None = None,method: str = "prf", **fit_kw) -> tuple:
         """
         Fit a model to the per-pixel transit depth heatmap.
-
-        The spatial transit depth map(s) are fit using one of the following:
-        - 'prf'        : Fit a mission PRF model (single TCE or joint fit).
-        - '2dgaussian' : Fit an unconstrained 2D Gaussian model.
-        - 'custom'     : Fit a user-supplied residual function.
 
         Parameters
         ----------
         model_func : callable, optional
-            Custom residual function (used only if `method='custom'`).
+            Custom residual function used when ``method="custom"``.
         which_tce : int, optional
-            Index of the TCE to fit. If None and `method='prf'`, a joint PRF fit is performed across all TCEs.
-        method : str
-            Fitting method: 'prf', '2dgaussian', or 'custom'.
+            Index of the TCE to fit. For ``method="prf"``, if None, a joint
+            PRF fit is performed across all valid TCEs.
+        method : str, optional
+            Fitting method. Must be ``"prf"``, ``"2dgaussian"``, or
+            ``"custom"``.
         **fit_kw
             Additional keyword arguments passed to the custom model.
 
         Returns
         -------
-        result : lmfit.ModelResult or lmfit.MinimizerResult
+        result : lmfit.model.ModelResult or lmfit.minimizer.MinimizerResult
             Full fit result object.
         fit_metrics : dict
-            Dictionary containing key localization metrics:
-            - 'centerx', 'centery' : best-fit centroid position
-            - 'sigmax', 'sigmay'   : 1-sigma uncertainties on centroid
+            Dictionary containing the best-fit centroid position and
+            corresponding 1-sigma uncertainties. Keys are ``"centerx"``,
+            ``"centery"``, ``"sigmax"``, and ``"sigmay"``.
+
         Raises
         ------
         ValueError
-            If an unsupported fitting method is provided.
+            If an unsupported fitting method is provided, if ``which_tce``
+            is required but not provided, or if a required argument for
+            the selected fitting method is missing.
+        KeyError
+            If ``which_tce`` does not correspond to a valid TCE for the
+            current quarter or sector.
+        RuntimeError
+            If an unexpected error occurs during fitting.
         """
         
         amp = self.transit_weights.copy()
@@ -672,25 +658,29 @@ class Localize(object):
                     #constraining the amplitude param
                     params.add('amplitude',value=np.nanmax(amp[which_col]),min=0)
 
+                    if self.origin_row is None or self.origin_col is None:
+                        raise ValueError("origin_row and origin_col must be provided for a PRF fit.")
+
                     #inputs for prf_residual function
                     prf_fit_kw = {'prf':self.prf,'data':amp[which_col],'data_err':amp_err[which_col],
                                   'origin':(self.origin_row,self.origin_col),'shape':self.shape}
 
                     #minimizing to get the best fit results using prf_residual
-                    result = minimize(prf_residual,params,kws=prf_fit_kw) 
+                    result = minimize(prf_residual,params,kws=prf_fit_kw)
 
                 else:
                     #constraining the amplitude param for all tces
-                    for i in self.valid_tces:#range(len(self.tces)):
+                    for i in self.valid_tces:
                         col_i = self.tce_mapping[i]
                         params.add(f'amplitude_{i}',value=np.nanmax(amp[col_i]),min=0)
 
                     #inputs for all_prf_residual function
                     prf_fit_kw = {'prf':self.prf,'data':amp,'data_err':amp_err,
-                                  'origin':(self.origin_row,self.origin_col),'shape':self.shape,'tces':self.tces}
+                                  'origin':(self.origin_row,self.origin_col),'shape':self.shape,
+                                  'valid_tces':self.valid_tces, 'tce_mapping': self.tce_mapping}
 
                     #minimizing to get the best fit results using prf_residual
-                    result = minimize(all_prf_residual,params,kws=prf_fit_kw) 
+                    result = minimize(all_prf_residual,params,kws=prf_fit_kw)
 
 
                 #extracing most important fit metrics 
@@ -703,14 +693,22 @@ class Localize(object):
             elif method == 'custom':
                 print('i dont know if this will actually work so good luck :)')
 
+                if which_tce is None:
+                    raise ValueError("which_tce must be provided.")
+
+                which_col = self.tce_mapping.get(which_tce)
+                
+                if which_col is None:
+                    raise KeyError("This TCE does not transit in this quarter/sector.")
+
                 params = Parameters()
                 #constraining params
                 params.add('centery', value=pix_row, min=0, max=self.shape[0]-1)
                 params.add('centerx', value=pix_col, min=0, max=self.shape[1]-1)
-                params.add('amplitude',value=np.nanmax(amp[which_tce]),min=0)
+                params.add('amplitude',value=np.nanmax(amp[which_col]),min=0)
 
                 #minimizing to get the best fit results
-                result = minimize(model_func,params,kws=fit_kw)
+                result = minimize(model_func,params,kws=fit_kw)#,grid=False)
 
                 #extracting most important fit metrics
                 fit_metrics['centerx'] = result.params['centerx'].value
@@ -720,14 +718,22 @@ class Localize(object):
 
 
             elif method == '2dgaussian':
+                if which_tce is None:
+                    raise ValueError("which_tce must be provided for a 2D Gaussian fit.")
+
+                which_col = self.tce_mapping.get(which_tce)
+
+                if which_col is None:
+                    raise KeyError("This TCE does not transit in this quarter/sector.")
+
                 #need to make sure there are no NaNs
-                mask = np.isfinite(amp[which_tce])
+                mask = np.isfinite(amp[which_col])
 
                 #create rows, cols, and amplitude
-                rows,cols = np.indices(amp[which_tce].shape)
+                rows,cols = np.indices(amp[which_col].shape)
                 x = cols[mask].ravel()
                 y = rows[mask].ravel()
-                z = amp[which_tce][mask].ravel()
+                z = amp[which_col][mask].ravel()
 
                 #using lmfit's 2d Gaussian model -- this is hardcoded
                 model_func = Gaussian2dModel()
@@ -752,33 +758,49 @@ class Localize(object):
             
         except ValueError as e:
             if which_tce is not None:
-                raise ValueError(f"Fit failed for TCE {which_tce} with Method {method}. {e}") from e
+                raise ValueError(f"Fit failed for TCE {which_tce} using method '{method}': {e}") from e
             else:
-                raise ValueError(f"Fit failed for all TCEs with Method {method}. {e}") from e
+                raise ValueError(f"Fit failed for all TCEs using method '{method}': {e}") from e
         except Exception as e:
             if which_tce is not None:
-                raise RuntimeError(f"Unexpected Fit failure for all TCEs with Method {method}: {e}") from e
-
+                raise RuntimeError(f"Unexpected error while fitting TCE {which_tce} using method '{method}': {e}") from e
+            else:
+                raise RuntimeError(f"Unexpected error while fitting all TCEs using method '{method}': {e}") from e
 
         #returns the whole report and the most important fit metrics
         return result, fit_metrics
 
 
 
-    def get_offset(self,fit_metrics):
+    def get_offset(self, fit_metrics: dict) -> tuple[float, float, float, float]:
         """
         Compute the centroid offset in units of sigma.
 
         Parameters
         ----------
         fit_metrics : dict
-            Dictionary containing fitted centroid values and uncertainties
-            ('centerx', 'centery', 'sigmax', 'sigmay').
+            Dictionary containing the fitted centroid positions and their
+            uncertainties. Must contain ``"centerx"``, ``"centery"``,
+            ``"sigmax"``, and ``"sigmay"``.
+        Returns
+        -------
+        nsigma : float
+            Radial offset between the fitted centroid and the expected source
+            position, expressed in units of the propagated positional
+            uncertainty.
+        dist : float
+            Euclidean distance between the fitted centroid and the expected
+            source position in pixels.
+        sigma_dist : float
+            Propagated 1-sigma uncertainty on the radial distance in pixels.
+        mah_dist : float
+            Mahalanobis distance between the fitted centroid and the expected
+            source position.
 
-        Attributes
-        ----
-        self.offset : float
-            Radial offset significance in units of sigma.
+        Raises
+        ------
+        KeyError
+            If a required key is missing from ``fit_metrics``.
         """
         #extract fit metrics
         x0 = fit_metrics['centerx']
@@ -809,63 +831,32 @@ class Localize(object):
         nsigma = dist/sigma_dist
 
         return nsigma, dist, sigma_dist, mah_dist
-    
-
-
-    def _get_all_metrics(self,pix_col,pix_row,model_func=None, method='prf',**fit_kw):
-        """
-        Run heatmap fitting and return localization metrics.
-
-        Parameters
-        ----------
-        pix_col : float
-            Reference pixel column position.
-        pix_row : float
-            Reference pixel row position.
-        model_func : callable, optional
-            Custom residual function (used if `method='custom'`).
-        method : str, optional
-            Fitting method ('prf', '2dgaussian', or 'custom').
-        **fit_kw
-            Additional keyword arguments passed to the fitting routine.
-
-        Returns
-        -------
-        dict
-            Dictionary containing centroid positions, uncertainties,
-            and the radial offset significance ('offset').
-        """
-        
-        #getting the fit metrics
-        _, fit_metrics = self.fit_to_heatmap(model_func=model_func, method=method,**fit_kw)
-
-        all_metrics = fit_metrics.copy()
-
-        #calculating the amount of sigma away
-        offset, _, _, _ = self.get_offset(fit_metrics,pix_col,pix_row)
-
-        #adding offset to metrics dictionary
-        all_metrics['offset'] = offset
-
-        return all_metrics
 
 
 
-    def plot_heatmap(self,metrics,which_tce,savefig=False,save_directory='.'):
+    def plot_heatmap(self,metrics: dict,which_tce: int,savefig: bool = False,save_directory: str = ".") -> None:
         """
         Generate a localization report plot for a given TCE.
 
         Parameters
         ----------
         metrics : dict
-            Dictionary containing fitted centroid values and uncertainties
-            ('centerx', 'centery', 'sigmax', 'sigmay').
+            Dictionary containing the fitted centroid positions and their
+            uncertainties. Must contain ``"centerx"``, ``"centery"``,
+            ``"sigmax"``, and ``"sigmay"``.
         which_tce : int
-            Index of the TCE in `self.tce` to visualize.
+            Index of the TCE in ``self.tces`` to visualize.
         savefig : bool, optional
-            If True, save the figure to disk (default False).
+            If True, save the figure to disk. Default is False.
         save_directory : str, optional
-            Directory where the figure will be saved.
+            Directory where the figure will be saved. Default is the
+            current directory.
+
+        Raises
+        ------
+        KeyError
+            If ``which_tce`` does not correspond to a valid TCE for the
+            current quarter or sector.
         """
 
         which_col = self.tce_mapping.get(which_tce)
@@ -887,13 +878,14 @@ class Localize(object):
         #getting offset
         nsigma,dist,sigma_dist,mah_dist = self.get_offset(metrics)
 
-        fig, axes = plt.subplots(1,3, figsize=(16,4))
+        fig, axes = plt.subplots(1,3, figsize=(16,4), layout='compressed', 
+                         gridspec_kw={'width_ratios': [1.2, 1.2, 0.8]})
 
         axes[1].plot(pix_col,pix_row, 'rx')
 
         axes[1].errorbar(x0,y0,xerr=x0_err,yerr=y0_err,fmt='o',c='k',markersize=4,capsize=1.5)
 
-        cax=axes[1].imshow(self.transit_weights[which_col]/self.transit_weights_err[which_col], cmap='inferno',origin='lower')#,vmin=0)
+        cax=axes[1].imshow(self.transit_weights[which_col]/self.transit_weights_err[which_col], cmap='inferno',origin='lower')
         axes[1].scatter(self.gaia_pix[0],self.gaia_pix[1],c='w',edgecolors='k',s=60)
         axes[1].tick_params(axis='both', labelsize=13)
         axes[1].set_xlabel('Pixel Number', fontsize=14)
@@ -901,12 +893,12 @@ class Localize(object):
         axes[1].set_xlim(-0.5,self.shape[1]-0.5)
         axes[1].set_ylim(-0.5,self.shape[0]-0.5)
         
-        cbar1 = fig.colorbar(cax, ax=axes[1])
+        cbar1 = fig.colorbar(cax, ax=axes[1], fraction=0.046, pad=0.04)
         cbar1.ax.tick_params(labelsize=13)
         cbar1.set_label('Depth / Depth Error', fontsize=16)
 
 
-        cax1 = axes[0].imshow(np.nanmean(self.flux, axis=0),origin='lower')#, norm=colors.LogNorm()) 
+        cax1 = axes[0].imshow(np.nanmean(self.flux, axis=0),origin='lower')
         axes[0].plot(pix_col,pix_row, 'rx')
 
         axes[0].scatter(self.gaia_pix[0],self.gaia_pix[1],c='w',edgecolors='k',s=60)
@@ -927,16 +919,16 @@ class Localize(object):
             axes[0].set_xticks(np.arange(0,self.shape[1],2))
             axes[0].set_yticks(np.arange(0,self.shape[0],2))
         
-        cbar2 = fig.colorbar(cax1, ax=axes[0])
+        cbar2 = fig.colorbar(cax1, ax=axes[0], fraction=0.046, pad=0.04)
         cbar2.ax.tick_params(labelsize=13)
         cbar2.set_label('Flux [e-/sec]', fontsize=16)
 
         #side panel with offset info
         axes[2].axis('off')
 
-        report_text = (f'Offset:\n {nsigma:.4g}'+r'$\sigma$'+f'\n\n'
-                       f'Euclidean Dist:\n {dist:.4g} pixels\n\n'
+        report_text = (f'Euclidean Dist:\n {dist:.4g} pixels\n\n'
                        f'Euclidean Dist Error:\n {sigma_dist:.4g} pixels\n\n'
+                       f'Offset:\n {nsigma:.4g}'+r'$\sigma$'+f'\n\n'
                        f'Mahalanobis Dist:\n {mah_dist:.4g}'+r'$\sigma$')
         
         axes[2].text(0, 0.5, report_text,fontsize=14,verticalalignment='center')
@@ -954,6 +946,7 @@ class Localize(object):
             cat_name='CANDIDATE'
             obs_label=''
             obs_prefix=''
+
         
         plt.suptitle(f'{obs_label} InCINERATOr Report for {cat_name} {self.id}.0{which_tce+1}', fontsize=18)
 
@@ -968,14 +961,30 @@ class Localize(object):
 class MultiLocalize(object):
     
     #initializing -- loading in Localize objects
-    def __init__(self, loc_object_list):
+    def __init__(self, loc_object_list: list[Localize]) -> None:
+        """
+        Initialize a collection of Localize objects.
+
+        Parameters
+        ----------
+        loc_object_list : list[Localize]
+            List of Localize objects corresponding to different quarters
+            or sectors. Objects with no valid TCEs are excluded.
+
+        Raises
+        ------
+        ValueError
+            If no Localize objects contain valid TCEs.
+        """
 
         #filtering out quarters that have no transits at all
         valid_loc_list = [loc for loc in loc_object_list if len(loc.valid_tces) > 0]
+        if len(valid_loc_list) == 0:
+            raise ValueError("No Localize objects contain valid TCEs.")
 
         #extracting information from each Localize object given 
         self.loc_object_list = valid_loc_list
-        self.n_quarters = len(valid_loc_list)
+        self.n_observations = len(valid_loc_list)
         self.tces = valid_loc_list[0].tces
         self.ra_targ = valid_loc_list[0].ra_targ
         self.dec_targ = valid_loc_list[0].dec_targ
@@ -1001,7 +1010,33 @@ class MultiLocalize(object):
 
     
 
-    def fit_to_quarters(self, model_func=None, which_tce=None, method=None,**fit_kw):
+    def fit_to_quarters(self, which_tce: int | None = None) -> tuple:
+        """
+        Fit a joint PRF model to the transit depth maps across observations.
+
+        Parameters
+        ----------
+        which_tce : int
+            Index of the TCE in ``self.tces`` to fit.
+
+        Returns
+        -------
+        result : lmfit.minimizer.MinimizerResult
+            Full fit result object.
+        fit_metrics : dict
+            Dictionary containing the fitted sky position and its
+            1-sigma uncertainties. Contains ``"centerra"``,
+            ``"sigmara"``, ``"centerdec"``, and ``"sigmadec"``.
+
+        Raises
+        ------
+        KeyError
+            If the requested TCE is not present in any observation.
+        ValueError
+            If the PRF fit fails or the requested TCE cannot be fit.
+        RuntimeError
+            If an unexpected error occurs during the PRF fit.
+        """
 
         amp_list = self.transit_weights_list.copy()
         amp_err_list = self.transit_weights_err_list.copy()
@@ -1009,53 +1044,46 @@ class MultiLocalize(object):
         #initializing metrics dictionary
         fit_metrics = {}
 
-        if method == 'prf':
-
-            params = Parameters()
-            #constraining params
-            if self.ra_bonus is not None and self.dec_bonus is not None:
-                params.add('centerra', value=self.ra_bonus)
-                params.add('centerdec', value=self.dec_bonus)
-
-            else:
-                params.add('centerra', value=self.ra_targ)
-                params.add('centerdec', value=self.dec_targ)
-            
-
-            #doing the fit for only one tce, if a tce number is given 
-            if which_tce is not None:
-                #create a subset of all information we need for minimizer based on which quarters/sectors contain this tce
-                valid_idxs = [i for i in range(self.n_quarters) if which_tce in self.valid_tces_list[i]]
-                print(valid_idxs)
-
-                #constraining the amplitude param for all quarters
-                for i in valid_idxs:
-                    which_col = self.tce_mapping_list[i].get(which_tce)
-                    if which_col is None:
-                        continue
-
-                    params.add(f'amplitude_{i}',value=np.nanmax(amp_list[i][which_col]),min=0)
-                
-                #inputs for all_prf_residual function
-                prf_fit_kw = {'prf_list':self.prf_list,'data_list':amp_list,'data_err_list':amp_err_list,
-                              'origin_list':self.origin_list,'wcs_list':self.wcs_list,'shape_list':self.shape_list,
-                              'tce_mapping_list':self.tce_mapping_list,'valid_idxs':valid_idxs,'which_tce':which_tce}
-                
-                try:
-                    #minimizing to get the best fit results using prf_residual
-                    result = minimize(quarters_prf_residual,params,kws=prf_fit_kw) 
-                    
-                except ValueError as e:
-                    raise ValueError(f"PRF fit failed for TCE {which_tce}. {e}") from e
-
-                except Exception as e:
-                    raise RuntimeError(f"Unexpected PRF failure for TCE {which_tce}. {e}") from e
-                
-            else:
-                raise ValueError("Only supports one tce at a time for the moment.")
-
+        params = Parameters()
+        #constraining params
+        if self.ra_bonus is not None and self.dec_bonus is not None:
+            params.add('centerra', value=self.ra_bonus)
+            params.add('centerdec', value=self.dec_bonus)
         else:
-            raise ValueError("Method only supports 'prf' for the moment.")
+            params.add('centerra', value=self.ra_targ)
+            params.add('centerdec', value=self.dec_targ)
+        
+        #doing the fit for only one tce, if a tce number is given 
+        if which_tce is not None:
+            #create a subset of all information we need for minimizer based on which quarters/sectors contain this tce
+            valid_idxs = [i for i in range(self.n_observations) if which_tce in self.valid_tces_list[i]]
+            if not valid_idxs:
+                raise KeyError(f"TCE {which_tce} is not present in any observation.")
+            
+            #constraining the amplitude param for all quarters
+            for i in valid_idxs:
+                which_col = self.tce_mapping_list[i].get(which_tce)
+                if which_col is None:
+                    continue
+                params.add(f'amplitude_{i}',value=np.nanmax(amp_list[i][which_col]),min=0)
+            
+            #inputs for all_prf_residual function
+            prf_fit_kw = {'prf_list':self.prf_list,'data_list':amp_list,'data_err_list':amp_err_list,
+                          'origin_list':self.origin_list,'wcs_list':self.wcs_list,'shape_list':self.shape_list,
+                          'tce_mapping_list':self.tce_mapping_list,'valid_idxs':valid_idxs,'which_tce':which_tce}
+            
+            try:
+                #minimizing to get the best fit results using prf_residual
+                result = minimize(quarters_prf_residual,params,kws=prf_fit_kw)#,grid=False) 
+                
+            except ValueError as e:
+                raise ValueError(f"PRF fit failed for TCE {which_tce}: {e}") from e
+
+            except Exception as e:
+                raise RuntimeError(f"Unexpected error during PRF fit for TCE {which_tce}: {e}") from e
+            
+        else:
+            raise ValueError("Only supports one tce at a time for the moment. You need to specify a tce.")
         
         #extracing most important fit metrics 
         fit_metrics['centerra'] = result.params['centerra'].value
@@ -1063,46 +1091,69 @@ class MultiLocalize(object):
         fit_metrics['centerdec'] = result.params['centerdec'].value
         fit_metrics['sigmadec'] = result.params['centerdec'].stderr
 
-        
         #returns the who report and the most important fit metrics
         return result, fit_metrics
     
 
 
-    def get_quarters_offset(self,fit_metrics):
+    def get_quarters_offset(self,fit_metrics: dict[str, float]) -> tuple[float, float, float, float]:
+        """
+        Calculate the angular offset between the fitted and reference positions.
 
+        Parameters
+        ----------
+        fit_metrics : dict
+            Dictionary containing the fitted sky position and its
+            1-sigma uncertainties. Required keys are ``'centerra'``,
+            ``'centerdec'``, ``'sigmara'``, and ``'sigmadec'``.
+
+        Returns
+        -------
+        nsigma : float
+            Offset between the fitted and reference positions in units
+            of the propagated 1-sigma uncertainty.
+        dist : float
+            Angular separation between the fitted and reference positions
+            in degrees.
+        sigma_dist : float
+            1-sigma uncertainty on the angular separation in degrees.
+        mah_dist : float
+            Mahalanobis distance between the fitted and reference positions.
+
+        Raises
+        ------
+        KeyError
+            If a required key is missing from ``fit_metrics``.
+        """
+        
         #extract fit metrics
         ra0 = fit_metrics['centerra'] 
         dec0 = fit_metrics['centerdec'] 
         ra0_err = fit_metrics['sigmara'] 
         dec0_err = fit_metrics['sigmadec']
 
-        cov = np.array([[ra0_err**2,0],[0,dec0_err**2]])
-        inv_cov = np.linalg.inv(cov)
-
         #calculating differences
         if self.ra_bonus is not None and self.dec_bonus is not None:
-            dra = (ra0 - self.ra_bonus)
-            ddec = (dec0 - self.dec_bonus)
-
-            dist = (dra**2 * np.cos(np.radians(self.dec_bonus))**2 + ddec**2)**(1/2)
-            sigma_dist = 1/dist * (dra**2 * np.cos(np.radians(self.dec_bonus))**4 * ra0_err**2 + ddec**2 * dec0_err**2)**(1/2)
-
-            x = np.array([ra0,dec0])
-            y = np.array([self.ra_bonus,self.dec_bonus])
-            mah_dist = mahalanobis(x,y,inv_cov)
-
+            reference_ra = self.ra_bonus
+            reference_dec = self.dec_bonus
         else:
-            dra = (ra0 - self.ra_targ)*np.cos(np.radians(self.dec_targ))
-            ddec = (dec0 - self.dec_targ)
+            reference_ra = self.ra_targ
+            reference_dec = self.dec_targ
 
-            dist = (dra**2 * np.cos(np.radians(self.dec_targ))**2 + ddec**2)**(1/2)
-            sigma_dist = 1/dist * (dra**2 * np.cos(np.radians(self.dec_targ))**4 * ra0_err**2 + ddec**2 * dec0_err**2)**(1/2)
+        cos_dec = np.cos(np.radians(reference_dec))
+        dra = (ra0 - reference_ra) * cos_dec
+        ddec = dec0 - reference_dec  
 
-            x = np.array([ra0,dec0])
-            y = np.array([self.ra_targ,self.dec_targ])
-            mah_dist = mahalanobis(x,y,inv_cov)
+        #calculating distance and its propagated uncertainty
+        dist = np.sqrt(dra**2 + ddec**2)
+        sigma_dist = (np.sqrt(dra**2 * ra0_err**2+ ddec**2 * dec0_err**2) / dist)
 
+        #calculating mahalanobis distance
+        cov = np.array([[(ra0_err*cos_dec)**2, 0],[0, dec0_err**2]])
+        inv_cov = np.linalg.inv(cov)
+        x = np.array([ra0*cos_dec, dec0])
+        y = np.array([reference_ra*cos_dec, reference_dec])
+        mah_dist = mahalanobis(x, y, inv_cov)
 
         #finding how many sigma away the center of the fit is from the actual location
         nsigma = dist/sigma_dist
@@ -1111,7 +1162,33 @@ class MultiLocalize(object):
 
 
 
-    def plot_multi_quarter(self,fit_metrics,which_tce,savefig=False,save_directory='.'):
+    def plot_multi_quarter(self,fit_metrics: dict[str, float],which_tce: int,savefig: bool = False,save_directory: str = '.') -> None:
+        """
+        Generate a localization plot combining fits from multiple observations.
+
+        Parameters
+        ----------
+        fit_metrics : dict
+            Dictionary containing the joint fitted sky position and its
+            1-sigma uncertainties. Required keys are ``'centerra'``,
+            ``'centerdec'``, ``'sigmara'``, and ``'sigmadec'``.
+        which_tce : int
+            Index of the TCE to visualize.
+        savefig : bool, optional
+            If True, save the figure to disk (default False).
+        save_directory : str, optional
+            Directory where the figure will be saved (default '.').
+
+        Raises
+        ------
+        KeyError
+            If ``which_tce`` is not present in an observation.
+        ValueError
+            If a per-observation PRF fit fails.
+        RuntimeError
+            If an unexpected error occurs during a per-observation fit.
+        """
+
         ra0 = fit_metrics['centerra'] 
         dec0 = fit_metrics['centerdec'] 
         ra0err = fit_metrics['sigmara'] 
@@ -1130,26 +1207,25 @@ class MultiLocalize(object):
 
         per_quart_ra_fit = []
         per_quart_dec_fit = []
-        for i in range(self.n_quarters):
+        for i in range(self.n_observations):
             fit = self.loc_object_list[i].fit_to_heatmap(method='prf',which_tce=which_tce)
             x0 = fit[1]['centerx']
             y0 = fit[1]['centery']
             sky = self.wcs_list[i].pixel_to_world(x0,y0)
-            print(sky)
             per_quart_ra_fit.append(sky.ra.degree)
             per_quart_dec_fit.append(sky.dec.degree)
 
         #use catalog dec for projection
-        dec0_rad = np.deg2rad(catalog_dec)
+        cos_dec = np.cos(np.radians(catalog_dec))
 
         #calculate differences
-        ra_fit_diff = (ra0 - catalog_ra) * np.cos(dec0_rad)
+        ra_fit_diff = (ra0 - catalog_ra) * cos_dec
         dec_fit_diff = (dec0 - catalog_dec)
 
-        per_quarter_ra_diff = (per_quart_ra_fit - catalog_ra) * np.cos(dec0_rad)
-        per_quarter_dec_diff = (per_quart_dec_fit - catalog_dec)
+        per_quarter_ra_diff = (np.array(per_quart_ra_fit) - np.array(catalog_ra)) * cos_dec
+        per_quarter_dec_diff = (np.array(per_quart_dec_fit) - np.array(catalog_dec))
 
-        ra_neighbors_diff = (self.gaia_coord.ra.deg - catalog_ra) * np.cos(dec0_rad)
+        ra_neighbors_diff = (self.gaia_coord.ra.deg - catalog_ra) * cos_dec
         dec_neighbors_diff = (self.gaia_coord.dec.deg - catalog_dec)
         
         #convert to arcseconds
@@ -1161,7 +1237,6 @@ class MultiLocalize(object):
         dec_neighbors_diff *= 3600
         per_quarter_ra_diff *= 3600
         per_quarter_dec_diff *= 3600
-
 
         fig = plt.figure(figsize=(8,6))
         gs = GridSpec(1,2, width_ratios=[3,1], figure=fig, wspace=0.05)
@@ -1178,10 +1253,7 @@ class MultiLocalize(object):
         #ax.scatter(ra_neighbors_diff,dec_neighbors_diff, color='blue', alpha=0.8)
 
         #catalog at origin
-        ax.scatter(0, 0, color='orange', marker='*', s=400)#, label='Catalog position')
-
-        #3 sigma ellipse around fit 
-        ax.add_patch(Ellipse((ra_fit_diff, dec_fit_diff),width=3*mah_dist,height=3*mah_dist,fill=False,color='c'))
+        ax.scatter(0, 0, color='orange', marker='*', s=400)
 
         ax.set_xlabel(r'$\Delta$ RA [arcsec]', fontsize=14) 
         ax.set_ylabel(r'$\Delta$ Dec [arcsec]',fontsize=14)
@@ -1191,17 +1263,12 @@ class MultiLocalize(object):
         ax_text = fig.add_subplot(gs[1])
         ax_text.axis('off')
 
-        report_text = (f'Offset:\n {nsigma:.4g}'+r'$\sigma$'+f'\n\n'
-                       f'Euclidean Dist:\n {dist*3600:.4g} arcsec\n\n'
+        report_text = (f'Euclidean Dist:\n {dist*3600:.4g} arcsec\n\n'
                        f'Eucl Dist Error:\n {sigma_dist*3600:.4g} arcsec\n\n'
+                       f'Offset:\n {nsigma:.4g}'+r'$\sigma$'+f'\n\n'
                        f'Mahalanobis Dist:\n {mah_dist:.4g}'+r'$\sigma$')
         
-        ax_text.text(0, 0.5, report_text,fontsize=14,verticalalignment='center')#,family='monospace')
-
-        #r = np.hypot(ra_fit_diff, dec_fit_diff)
-        #ax.set_xlim(-r-ra0err,r+ra0err)
-        #ax.set_ylim(-r-dec0err-1,r+dec0err+1)
-        
+        ax_text.text(0, 0.5, report_text,fontsize=14,verticalalignment='center')
 
         if self.mission=='kepler':
             cat_name='KIC'
@@ -1214,5 +1281,3 @@ class MultiLocalize(object):
 
         if savefig:
             plt.savefig(save_directory+'/multi_quarter_incinerator_report_'+cat_name+self.id+'.0'+str(which_tce+1)+'.png', dpi=200, pad_inches=0.5, bbox_inches='tight')
-
-        

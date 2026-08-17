@@ -49,7 +49,7 @@ docs_dir = "docs"
 
 nav = [
   { "Home" = "README.md" },
-  { "API" = ["localize.md", "utils.md"] },
+  { "API" = ["localize.md", "multilocalize.md", "utils.md"] },
   { "Tutorial" = "tutorials/incinerator_tutorial.md"}
   ]
 

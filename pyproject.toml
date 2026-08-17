@@ -1,6 +1,6 @@
 [project]
 name = "incinerator"
-version = "1.0.0"
+version = "1.1.0"
 description = "A pixel-level exoplanet transit vetting technique!"
 readme = "docs/README.md"
 authors = [
@@ -12,7 +12,7 @@ authors = [
 license = "MIT"
 
 
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "astropy>=7.1.0,<8.0.0",
     "astroquery>=0.4.11",
@@ -47,8 +47,8 @@ dev = [
 ]
 
 [tool.ruff]
-# Assumes python 3.12
-target-version = "py312"
+# Assumes python 3.11
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`), a subset of pycodestyle (`E`) and isort (`I`).

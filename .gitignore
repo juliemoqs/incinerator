@@ -10,6 +10,8 @@ wheels/
 *.egg-info
 site/
 gaia_cache/
+vizier_cache/
+.python-version
 
 # zensical documentation
 /sites
@@ -19,4 +21,5 @@ gaia_cache/
 
 # Virtual environments
 .venv
+.venv311
 .vscode
