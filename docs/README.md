@@ -13,8 +13,8 @@ The easiest way to install `incinerator` and all of its dependencies is with `pi
 We recommend you do this installation in a new [virtual environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html).
 
 ```bash
-# Create new environment called incinerator with Python 3.12
-conda create -n incinerator python=3.12
+# Create new environment called incinerator with Python 3.11
+conda create -n incinerator python=3.11
 
 # Activate environment
 conda activate incinerator

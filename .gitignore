@@ -9,6 +9,9 @@ dist/
 wheels/
 *.egg-info
 site/
+gaia_cache/
+vizier_cache/
+.python-version
 
 # zensical documentation
 /sites
@@ -18,3 +21,5 @@ site/
 
 # Virtual environments
 .venv
+.venv311
+.vscode
