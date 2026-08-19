@@ -591,7 +591,7 @@ class Localize(object):
 
 
 
-    def fit_to_heatmap(self,model_func=None,which_tce: int | None = None,method: str = "prf", **fit_kw) -> tuple:
+    def fit_to_heatmap(self,model_func=None,which_tce: int | None = None,method: str = "prf",initial_loc: tuple[float, float] | None = None,**fit_kw) -> tuple:
         """
         Fit a model to the per-pixel transit depth heatmap.
 
@@ -605,6 +605,10 @@ class Localize(object):
         method : str, optional
             Fitting method. Must be ``"prf"``, ``"2dgaussian"``, or
             ``"custom"``.
+        initial_loc : tuple of float, optional
+            Initial guess for the centroid position as ``(col, row)`` in pixel
+            coordinates. If None, the position is initialized using ``ra_bonus``
+            and ``dec_bonus`` if provided, otherwise ``ra_targ`` and ``dec_targ``.
         **fit_kw
             Additional keyword arguments passed to the custom model.
 
@@ -636,8 +640,13 @@ class Localize(object):
         #initializing metrics dictionary
         fit_metrics = {}
 
-        #getting pix coord for target star
-        pix_col, pix_row = coords_to_pixels(self.wcs,self.ra_targ,self.dec_targ)
+        #getting pix coord
+        if initial_loc is not None:
+            pix_col, pix_row = initial_loc
+        elif self.ra_bonus is not None and self.dec_bonus is not None:
+            pix_col, pix_row = coords_to_pixels(self.wcs, self.ra_bonus, self.dec_bonus)
+        else:
+            pix_col, pix_row = coords_to_pixels(self.wcs, self.ra_targ, self.dec_targ)
 
         try:
 
@@ -1010,7 +1019,7 @@ class MultiLocalize(object):
 
     
 
-    def fit_to_quarters(self, which_tce: int | None = None) -> tuple:
+    def fit_to_quarters(self, which_tce: int | None = None, initial_location: tuple[float, float] | None = None) -> tuple:
         """
         Fit a joint PRF model to the transit depth maps across observations.
 
@@ -1018,6 +1027,10 @@ class MultiLocalize(object):
         ----------
         which_tce : int
             Index of the TCE in ``self.tces`` to fit.
+        initial_location : tuple of float, optional
+            Initial guess for the sky position as ``(ra, dec)``. If None, the
+            position is initialized using ``ra_bonus`` and ``dec_bonus`` if
+            provided, otherwise ``ra_targ`` and ``dec_targ``.
 
         Returns
         -------
@@ -1046,12 +1059,15 @@ class MultiLocalize(object):
 
         params = Parameters()
         #constraining params
-        if self.ra_bonus is not None and self.dec_bonus is not None:
-            params.add('centerra', value=self.ra_bonus)
-            params.add('centerdec', value=self.dec_bonus)
+        if initial_location is not None:
+            ra, dec = initial_location
+        elif self.ra_bonus is not None and self.dec_bonus is not None:
+            ra, dec = self.ra_bonus, self.dec_bonus
         else:
-            params.add('centerra', value=self.ra_targ)
-            params.add('centerdec', value=self.dec_targ)
+            ra, dec = self.ra_targ, self.dec_targ
+
+        params.add('centerra', value=ra)
+        params.add('centerdec', value=dec)
         
         #doing the fit for only one tce, if a tce number is given 
         if which_tce is not None:
