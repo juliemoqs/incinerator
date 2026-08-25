@@ -12,7 +12,6 @@ Next, import `incinerator` and a few other useful packages.
 
 
 ```python
-import numpy as np
 import pandas as pd
 from astropy.io import fits
 
@@ -45,7 +44,7 @@ You will need to add the following to your imports:
 from astroquery.mast import Observations
 
 
-```
+```python
 #you can find the file in the tutorials/` folder inside the `docs/` directory on GitHub.
 file_path = "kplr006922244-2009166043257_lpd-targ.fits"
 #opening the file
@@ -193,6 +192,8 @@ full_report
 
 
 
+By default, fit_to_heatmap() initializes the fit at the target's catalog position, using ra_bonus/dec_bonus when available and otherwise ra_targ/dec_targ. If a better estimate of the source location is known, an initial pixel location can be provided with initial_loc=(col, row):
+
 ## Step 5: Visualize Results
 
 ### **Plot the results**
@@ -209,7 +210,7 @@ loc_obj.plot_heatmap(fit,0,savefig=False)
 
 
     
-![png](incinerator_tutorial_files/incinerator_tutorial_30_1.png)
+![png](incinerator_tutorial_files/incinerator_tutorial_31_1.png)
     
 
 
