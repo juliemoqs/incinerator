@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.11.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -124,18 +124,12 @@ wheels = [
 
 [[package]]
 name = "batman-package"
-version = "2.5.3"
+version = "2.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/42/9cde3488f2e5598e61483d5220ca7a25188fc4a0f4bd4ba773c8fed1aeb7/batman_package-2.5.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:6da75eb8f10f457f76c8260a6114d0c280428298aee2578f89c7cca05b26a34e", size = 59439, upload-time = "2025-05-05T20:51:49.598Z" },
-    { url = "https://files.pythonhosted.org/packages/19/0a/d61567a83de9cb4bf04e45bc963dbefd7222a48c552f1da722bc25014c37/batman_package-2.5.3-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:4f33d5f67d237a5f30d2dbbd7347d332d6250209909c34d9bb2c133a17597aad", size = 233106, upload-time = "2025-05-05T20:51:51.037Z" },
-    { url = "https://files.pythonhosted.org/packages/41/e0/c563f180f235470d61edb6b7442285995f4bec1a7be3ed9103bfcfdcd7f7/batman_package-2.5.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cb620485f03d93a9a9e276638f0f6b9f19a3309649c42becf14ceab6ce7f3b13", size = 240832, upload-time = "2025-05-05T20:51:52.611Z" },
-    { url = "https://files.pythonhosted.org/packages/7f/28/7ef0cc7c876fdb214591f2692f918a7277c7184f253a3174965ba8149275/batman_package-2.5.3-cp311-cp311-win32.whl", hash = "sha256:e5b9d824170d29b0b13e6d117e4680038cbf2b993a93eff7b5dfbca5adcbd8ce", size = 84635, upload-time = "2025-05-05T20:51:54.075Z" },
-    { url = "https://files.pythonhosted.org/packages/3a/6e/e7066bcef2d7f8441b2ceb2d5426a57e1ea4e009a03cf1b4fb090495d383/batman_package-2.5.3-cp311-cp311-win_amd64.whl", hash = "sha256:1a0fba8e4940834840f4182da923ee22d95169f6f305c99e7e8e893baebe521c", size = 89689, upload-time = "2025-05-05T20:51:54.995Z" },
-]
+sdist = { url = "https://files.pythonhosted.org/packages/99/99/70dc1d3c143f3765514eea61ff2f068ae93ea0f51a9dcd591e723b56893e/batman_package-2.5.2.tar.gz", hash = "sha256:c97fae5485ab0baadf39d221a945692da0bcc2286ef8eab1599e739718347239", size = 399285, upload-time = "2025-01-10T16:38:23.879Z" }
 
 [[package]]
 name = "beautifulsoup4"
@@ -313,7 +307,7 @@ name = "cryptography"
 version = "46.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "platform_python_implementation != 'PyPy' and sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/60/04/ee2a9e8542e4fa2773b81771ff8349ff19cdd56b7258a0cc442639052edb/cryptography-46.0.5.tar.gz", hash = "sha256:abace499247268e3757271b2f1e244b36b06f8515cf27c4d49468fc9eb16e93d", size = 750064, upload-time = "2026-02-10T19:18:38.255Z" }
 wheels = [
@@ -519,7 +513,7 @@ wheels = [
 
 [[package]]
 name = "incinerator"
-version = "1.1.0"
+version = "1.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
@@ -551,7 +545,7 @@ dev = [
 requires-dist = [
     { name = "astropy", specifier = ">=7.1.0,<8.0.0" },
     { name = "astroquery", specifier = ">=0.4.11" },
-    { name = "batman-package", specifier = ">=2.5.3" },
+    { name = "batman-package", specifier = ">=2.5.2,<2.5.3" },
     { name = "cmasher", specifier = ">=1.9.2" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "lamatrix", specifier = ">=1.0.1" },
@@ -1341,7 +1335,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -1739,8 +1733,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
